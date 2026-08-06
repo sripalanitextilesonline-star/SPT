@@ -367,14 +367,16 @@ html {
   will-change: transform;
 }
 
-/* Clean logo-style announcement bar — solid red + gold text, no craft paper */
+/* Red bar + light gold text (readable yellow, not logo gold on red) */
 .announcement-bar {
   --announcement-rail-height: 2.25rem;
+  --announcement-text: #fff4c2;
+  --announcement-text-strong: #ffe566;
   position: relative;
   overflow: hidden;
   border-bottom: 1px solid hsl(356 86% 28%);
   background: hsl(var(--brand-rose));
-  color: hsl(var(--brand-gold));
+  color: var(--announcement-text);
   contain: layout paint;
 }
 
@@ -382,7 +384,8 @@ html {
   position: relative;
   min-height: var(--announcement-rail-height);
   background: transparent;
-  color: hsl(var(--brand-gold));
+  color: var(--announcement-text);
+  text-shadow: 0 1px 1px hsl(356 90% 18% / 0.35);
 }
 
 .announcement-marquee-mask {
