@@ -10,17 +10,12 @@ const ADDRESS_LINES = [
   "Salem D.T – 637502, Tamil Nadu",
 ] as const;
 
-/** Store phones (India) — used by footer, contact page, and floating call/WhatsApp */
+/** Store phone (India) — used by footer, contact page, and floating call/WhatsApp */
 const CONTACTS = [
   {
     name: "Shop",
     phone: "+91 90924 67372",
     phoneHref: "tel:+919092467372",
-  },
-  {
-    name: "Mobile",
-    phone: "+91 98657 37475",
-    phoneHref: "tel:+919865737475",
   },
 ] as const;
 

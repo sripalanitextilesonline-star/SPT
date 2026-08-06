@@ -22,7 +22,7 @@ const faqs = [
   },
   {
     q: "Can I visit your store?",
-    a: `Yes. We are at ${siteConfig.address}. See our Contact page for phones and directions.`,
+    a: `Yes. We are at ${siteConfig.address}. See our Contact page for phone and directions.`,
   },
   {
     q: "What do you sell?",

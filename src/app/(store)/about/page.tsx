@@ -25,19 +25,7 @@ export default function AboutPage() {
         Visit us in Elampillai, Salem ({siteConfig.address}). Call{" "}
         <a href={siteConfig.phoneHref} className="text-primary hover:underline">
           {siteConfig.phone}
-        </a>
-        {siteConfig.contacts[1] ? (
-          <>
-            {" "}
-            or{" "}
-            <a
-              href={siteConfig.contacts[1].phoneHref}
-              className="text-primary hover:underline"
-            >
-              {siteConfig.contacts[1].phone}
-            </a>
-          </>
-        ) : null}{" "}
+        </a>{" "}
         for store visits, stock checks, and wholesale enquiries.
       </p>
       <p>
