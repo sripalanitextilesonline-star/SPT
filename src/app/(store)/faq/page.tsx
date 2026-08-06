@@ -8,13 +8,13 @@ export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: `FAQ | ${siteConfig.name}`,
-  description: `Frequently asked questions about ${siteConfig.name} craft supplies`,
+  description: `Frequently asked questions about ${siteConfig.name} sarees and textiles`,
 };
 
 const faqs = [
   {
     q: "Do you sell wholesale?",
-    a: "Yes. We offer wholesale and bulk pricing for retailers and makers. Message us on Instagram with your requirements.",
+    a: "Yes. We offer wholesale and bulk pricing for retailers. Call or WhatsApp us with your requirements.",
   },
   {
     q: "How do I track my order?",
@@ -22,11 +22,11 @@ const faqs = [
   },
   {
     q: "Can I visit your store?",
-    a: "Yes. We are in Sarojini Nagar, Madurai. See our Contact page for the full address.",
+    a: `Yes. We are at ${siteConfig.address}. See our Contact page for phones and directions.`,
   },
   {
     q: "What do you sell?",
-    a: "Terracotta raw materials and art & craft supplies. Each product listing describes materials and usage. Ask us if you need help choosing.",
+    a: "Handloom cloth and sarees — silk, cotton, wedding and festive collections. Each product listing describes the material and style.",
   },
   {
     q: "How do returns work?",
@@ -40,22 +40,37 @@ export default async function FaqPage() {
   return (
     <InfoPage
       heading="FAQ"
-      description={`Answers to common questions about shopping with ${siteConfig.name}.`}
+      description={`Common questions about shopping with ${siteConfig.name}.`}
     >
-      <dl className="space-y-6">
+      <div className="space-y-6">
         {faqs.map((item) => (
-          <div key={item.q} className="space-y-1.5">
-            <dt className="font-semibold text-foreground">{item.q}</dt>
-            <dd className="text-muted-foreground">{item.a}</dd>
-          </div>
+          <section key={item.q} className="space-y-2">
+            <h2 className="text-base font-semibold text-foreground">
+              {item.q}
+            </h2>
+            <p className="text-muted-foreground">{item.a}</p>
+          </section>
         ))}
-      </dl>
-      <p className="pt-2 text-muted-foreground">
+      </div>
+
+      <p className="pt-2 text-sm text-muted-foreground">
         Still need help?{" "}
         <Link href="/contact" className="text-primary hover:underline">
           Contact us
         </Link>
-        {contact.address ? ` · ${contact.address}` : null}
+        {contact.phone ? (
+          <>
+            {" "}
+            or call{" "}
+            <Link
+              href={contact.phoneHref}
+              className="text-primary hover:underline"
+            >
+              {contact.phone}
+            </Link>
+          </>
+        ) : null}
+        .
       </p>
     </InfoPage>
   );

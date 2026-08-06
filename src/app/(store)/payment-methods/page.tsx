@@ -8,7 +8,7 @@ export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: "Payment Methods | Sri Palani Textiles",
-  description: "How to pay for craft supplies at Sri Palani Textiles",
+  description: "How to pay for sarees and textiles at Sri Palani Textiles",
 };
 
 export default function PaymentMethodsPage() {
@@ -32,8 +32,8 @@ export default function PaymentMethodsPage() {
       <section className="space-y-3">
         <h2 className="text-base font-semibold text-foreground">In-store</h2>
         <p>
-          Visit us at our Madurai store to pay by cash, UPI, or card. Our team
-          can help you choose terracotta materials and craft supplies.
+          Visit us at our Elampillai store to pay by cash, UPI, or card. Our
+          team can help you choose silk and cotton sarees.
         </p>
       </section>
 

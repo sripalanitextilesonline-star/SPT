@@ -23,7 +23,7 @@ export default async function ContactPage() {
   return (
     <InfoPage
       heading="Contact Us"
-      description="Reach Sri Palani Textiles by Instagram, email, or visit our store in Madurai."
+      description="Reach Sri Palani Textiles by phone, WhatsApp, or visit our store in Elampillai, Salem."
     >
       <section id="store" className="space-y-3">
         <h2 className="text-base font-semibold text-foreground">

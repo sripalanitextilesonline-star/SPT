@@ -64,7 +64,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (productName) {
     const productDescription =
       data?.productsCollection?.edges?.[0]?.node?.description?.trim() ||
-      `Buy ${productName} online from Sri Palani Textiles. Premium terracotta and craft supplies with secure checkout.`;
+      `Buy ${productName} online from Sri Palani Textiles. Premium silk and cotton sarees with secure checkout.`;
     return {
       title: productName,
       description: productDescription,
@@ -81,8 +81,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   return {
     title: "Sri Palani Textiles | Art & Craft Supplies",
-    description:
-      "Authentic terracotta and craft supplies — wholesale and retail",
+    description: "Authentic handloom cloth and sarees — wholesale and retail",
   };
 }
 

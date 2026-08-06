@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { siteConfig } from "@/config/site";
 import { SEO_PRIMARY_NAV } from "@/lib/seo/constants";
 
 export function HomeExploreLinks() {
@@ -14,8 +15,8 @@ export function HomeExploreLinks() {
         Explore Sri Palani Textiles
       </h2>
       <p className="mt-2 max-w-2xl text-sm text-muted-foreground md:text-base">
-        Shop terracotta raw materials and art & craft supplies online, browse
-        collections, and visit us in Madurai — Make · Craft · Create.
+        Shop silk and cotton sarees online, browse collections, and visit us in
+        Elampillai, Salem — {siteConfig.tagline}.
       </p>
       <nav
         className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"

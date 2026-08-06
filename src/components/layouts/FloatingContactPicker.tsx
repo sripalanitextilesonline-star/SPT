@@ -43,7 +43,13 @@ export function FloatingContactPicker({
   contacts,
 }: FloatingContactPickerProps) {
   const storefrontContact = useStorefrontContact();
-  const contactList = contacts ?? storefrontContact.contacts;
+  const contactList = (contacts ?? storefrontContact.contacts).filter(
+    (contact) => {
+      const href = contact.phoneHref?.trim() || "";
+      const phone = contact.phone?.trim() || "";
+      return Boolean(phone) && href !== "tel:" && href !== "";
+    },
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const styles = modeStyles[mode];
@@ -112,7 +118,7 @@ export function FloatingContactPicker({
 
           return (
             <a
-              key={contact.phoneHref}
+              key={`${contact.name}-${contact.phoneHref || contact.phone}`}
               href={href}
               role="menuitem"
               tabIndex={isOpen ? 0 : -1}

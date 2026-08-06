@@ -9,14 +9,14 @@ export const revalidate = 300;
 export const metadata: Metadata = {
   title: "All Collections",
   description:
-    "Browse craft collections at Sri Palani Textiles — terracotta materials, art supplies, and creative kits.",
+    "Browse saree collections at Sri Palani Textiles — silk, cotton, wedding and festive wear.",
   alternates: {
     canonical: "/collections",
   },
   openGraph: {
     title: "All Collections | Sri Palani Textiles",
     description:
-      "Browse terracotta and art & craft collections at Sri Palani Textiles.",
+      "Browse silk and cotton saree collections at Sri Palani Textiles.",
     url: "/collections",
   },
 };

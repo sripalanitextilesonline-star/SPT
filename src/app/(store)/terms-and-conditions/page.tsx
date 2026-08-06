@@ -10,7 +10,7 @@ export const revalidate = 3600;
 export const metadata: Metadata = {
   title: "Terms & Conditions | Sri Palani Textiles",
   description:
-    "Terms and Conditions and Terms of Use for shopping at Sri Palani Textiles (HOC) online craft store.",
+    "Terms and Conditions and Terms of Use for shopping at Sri Palani Textiles online store.",
   alternates: {
     canonical: "/terms-and-conditions",
   },
@@ -40,8 +40,8 @@ export default async function TermsAndConditionsPage() {
           <Link href="/" className="text-primary hover:underline">
             {siteConfig.url.replace(/^https:\/\//, "")}
           </Link>{" "}
-          operated by {businessName}, a terracotta and art &amp; craft supplies
-          merchant based in Madurai, Tamil Nadu, India (&quot;we&quot;,
+          operated by {businessName}, a handloom cloth and sarees merchant based
+          in Elampillai, Salem, Tamil Nadu, India (&quot;we&quot;,
           &quot;us&quot;, &quot;our&quot;).
         </p>
         <p>

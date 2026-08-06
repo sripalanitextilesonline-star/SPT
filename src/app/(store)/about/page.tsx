@@ -7,33 +7,38 @@ export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: `Our Story | ${siteConfig.name}`,
-  description: `About ${siteConfig.name} — terracotta raw materials and art & craft supplies from Madurai.`,
+  description: `About ${siteConfig.name} — handloom cloth and sarees from Elampillai, Salem.`,
 };
 
 export default function AboutPage() {
   return (
     <InfoPage
       heading="Our Story"
-      description={`${siteConfig.name}  — ${siteConfig.tagline}.`}
+      description={`${siteConfig.name} — ${siteConfig.tagline}.`}
     >
       <p>
-        {siteConfig.name} is your hub for terracotta raw materials and art &amp;
-        craft supplies. We help makers, hobbyists, and wholesale buyers find
-        quality materials to make, craft, and create.
+        {siteConfig.name} manufactures handloom cloth and sarees — silk, cotton,
+        wedding and festive collections with the care of a traditional textile
+        house.
       </p>
       <p>
-        Based in Madurai, Tamil Nadu ({siteConfig.address}), we combine the
-        warmth of a local craft shop with convenient online ordering. Follow us
-        on Instagram{" "}
-        <a
-          href={siteConfig.social.instagram}
-          className="text-primary hover:underline"
-          target="_blank"
-          rel="noreferrer"
-        >
-          @hub_of_craftss_by_shaaru
-        </a>{" "}
-        for new arrivals and ideas.
+        Visit us in Elampillai, Salem ({siteConfig.address}). Call{" "}
+        <a href={siteConfig.phoneHref} className="text-primary hover:underline">
+          {siteConfig.phone}
+        </a>
+        {siteConfig.contacts[1] ? (
+          <>
+            {" "}
+            or{" "}
+            <a
+              href={siteConfig.contacts[1].phoneHref}
+              className="text-primary hover:underline"
+            >
+              {siteConfig.contacts[1].phone}
+            </a>
+          </>
+        ) : null}{" "}
+        for store visits, stock checks, and wholesale enquiries.
       </p>
       <p>
         Browse our{" "}

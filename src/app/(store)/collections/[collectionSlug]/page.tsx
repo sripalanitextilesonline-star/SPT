@@ -40,7 +40,7 @@ export async function generateMetadata({ params }: CategoryPageProps) {
 
   return {
     title: `${collectionName} Sarees`,
-    description: `Shop ${collectionName} craft supplies at Sri Palani Textiles. Premium terracotta and craft supplies with secure online ordering.`,
+    description: `Shop ${collectionName} sarees at Sri Palani Textiles. Premium handloom textiles with secure online ordering.`,
     alternates: {
       canonical: path,
     },

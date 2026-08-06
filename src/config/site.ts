@@ -2,15 +2,25 @@ import type { NavItemWithOptionalChildren } from "@/types";
 
 export type SiteConfig = typeof siteConfig;
 
-/** Sri Palani Textiles */
-const ADDRESS_LINES = ["Address line 1", "City – PIN, Tamil Nadu"] as const;
+/** Sri Palani Textiles — Elampillai, Salem */
+const ADDRESS_LINES = [
+  "5/262, K.K. Nagar Keel Road",
+  "Near Vinayagar Kovil",
+  "Edanganasalai P.O, Elampillai",
+  "Salem D.T – 637502, Tamil Nadu",
+] as const;
 
-/** Contacts — add phone/WhatsApp when available */
+/** Store phones (India) — used by footer, contact page, and floating call/WhatsApp */
 const CONTACTS = [
   {
-    name: "Sri Palani Textiles",
-    phone: "",
-    phoneHref: "",
+    name: "Shop",
+    phone: "+91 90924 67372",
+    phoneHref: "tel:+919092467372",
+  },
+  {
+    name: "Mobile",
+    phone: "+91 98657 37475",
+    phoneHref: "tel:+919865737475",
   },
 ] as const;
 
@@ -23,7 +33,7 @@ const SOCIAL = {
   instagram: "",
   youtube: "",
   facebook: "",
-  whatsapp: "",
+  whatsapp: "https://wa.me/919092467372",
 } as const;
 
 export const siteConfig = {
@@ -33,18 +43,22 @@ export const siteConfig = {
   shortName: "SPT",
   tagline: "Quality Speak",
   /** Town shown on shop board / navbar */
-  location: "TAMIL NADU",
+  location: "ELAMPILLAI",
   description:
-    "Manufacturers of handloom cloth & sarees — premium silk, cotton, wedding and festive collections from Sri Palani Textiles.",
+    "Manufacturers of handloom cloth & sarees — premium silk, cotton, wedding and festive collections from Sri Palani Textiles, Elampillai, Salem.",
   searchPlaceholder: "Search sarees, collections…",
   url: "https://sripalanitextiles.com",
   addressLines: ADDRESS_LINES,
   /** Single-line address for compact UI */
   address: ADDRESS_LINES.join(", "),
+  /** Structured address for SEO / JSON-LD */
+  addressLocality: "Elampillai",
+  addressRegion: "Tamil Nadu",
+  postalCode: "637502",
   phone: PHONE,
   /** `tel:` href (digits only, with country code) */
   phoneHref: PHONE_HREF,
-  /** All proprietors / contact numbers */
+  /** All store / contact numbers */
   contacts: CONTACTS,
   email: EMAIL,
   gstin: GSTIN,

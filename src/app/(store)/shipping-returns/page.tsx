@@ -87,7 +87,7 @@ export default async function ShippingReturnsPage() {
             >
               Chat with us
             </Link>
-            {contact.phone ? ` (${contact.phone})` : " (8870669160)"}
+            {contact.phone ? ` (${contact.phone})` : ""}
           </li>
           {contact.phone ? (
             <li>
