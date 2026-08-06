@@ -23,16 +23,16 @@ import type { Metadata } from "next";
 export const revalidate = 120;
 
 export const metadata: Metadata = {
-  title: "Hub of craftss | Make · Craft · Create",
+  title: "Sri Palani Textiles | Silk · Cotton · Tradition",
   description:
-    "Shop terracotta raw materials and art & craft supplies at Hub of craftss by Shaaru in Madurai. Make · Craft · Create.",
+    "Shop premium sarees and textiles at Sri Palani Textiles — silk, cotton, wedding and festive collections.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    title: "Hub of craftss | Make · Craft · Create",
+    title: "Sri Palani Textiles | Silk · Cotton · Tradition",
     description:
-      "Shop terracotta raw materials and art & craft supplies at Hub of craftss by Shaaru in Madurai.",
+      "Shop premium sarees and textiles at Sri Palani Textiles — silk, cotton, wedding and festive collections.",
     url: "/",
   },
 };
@@ -174,7 +174,7 @@ function TrustFeatures({ phone }: { phone: string }) {
           <div className="mb-3 flex justify-center">
             <span
               className={cn(
-                "inline-flex h-12 w-12 items-center justify-center rounded-full bg-card shadow-[0_8px_24px_-12px_rgba(192,48,120,0.35)] ring-1 ring-brand-rose/15",
+                "inline-flex h-12 w-12 items-center justify-center rounded-full bg-card shadow-[0_8px_24px_-12px_rgba(227,6,19,0.35)] ring-1 ring-brand-rose/15",
               )}
             >
               <Icon className={cn("h-6 w-6", iconClass)} />

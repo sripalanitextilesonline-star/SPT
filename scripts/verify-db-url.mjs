@@ -3,6 +3,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { getProjectIdentity } from "./lib/project-identity.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 config({ path: resolve(root, ".env.local") });
@@ -10,9 +11,10 @@ config({ path: resolve(root, ".env.local") });
 const { resolveDatabaseUrl } = await import(
   "../src/lib/supabase/resolve-database-url.ts"
 );
+const identity = getProjectIdentity();
 
 const legacy =
-  "postgresql://postgres:xxx@db.qhtwwyqlsnckorndmhmt.supabase.co:5432/postgres";
+  `postgresql://postgres:xxx@db.${identity.supabase.projectRef}.supabase.co:5432/postgres`;
 const rewritten = resolveDatabaseUrl(legacy);
 const host = new URL(rewritten.replace(/^postgresql:/i, "http:")).host;
 console.log("rewrite sample host:", host);

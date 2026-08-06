@@ -8,8 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 
 export const metadata: Metadata = {
-  title: "Forgot Password | Hub of craftss",
-  description: "Reset your Hub of craftss account password",
+  title: "Forgot Password | Sri Palani Textiles",
+  description: "Reset your Sri Palani Textiles account password",
 };
 
 export default async function ForgotPasswordPage({

@@ -1,16 +1,18 @@
-/** Canonical storefront origin(s) used for auth redirects and SEO. */
-const DEFAULT_PRODUCTION_ORIGIN = "https://hubsofcraftss.com";
+import {
+  getAllowedAuthCallbackUrls,
+  getCanonicalSiteOrigin as getIdentityCanonicalSiteOrigin,
+  normalizeOrigin,
+  projectIdentity,
+} from "@/lib/project/identity";
 
-function normalizeOrigin(value: string): string {
-  const trimmed = value.trim().replace(/\/$/, "");
-  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
-}
-
-/** Primary site origin from env (production custom domain). */
+/** Primary site origin from env when explicitly local; otherwise use project identity. */
 export function getCanonicalSiteOrigin(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (fromEnv) {
-    return normalizeOrigin(fromEnv);
+    const normalized = normalizeOrigin(fromEnv);
+    if (projectIdentity.site.localOrigins.includes(normalized)) {
+      return normalized;
+    }
   }
 
   const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL?.trim();
@@ -18,7 +20,7 @@ export function getCanonicalSiteOrigin(): string {
     return normalizeOrigin(vercelUrl);
   }
 
-  return DEFAULT_PRODUCTION_ORIGIN;
+  return getIdentityCanonicalSiteOrigin();
 }
 
 /** Site base URL with trailing slash (for return/notify URL builders). */
@@ -27,27 +29,9 @@ export function getCanonicalSiteBaseUrl(): string {
   return origin.endsWith("/") ? origin : `${origin}/`;
 }
 
-/** All origins allowed to receive /auth/callback after OAuth (must match Supabase dashboard). */
+/** All URLs allowed to receive /auth/callback after OAuth (must match Supabase dashboard). */
 export function getAuthCallbackUrls(): string[] {
-  const canonical = getCanonicalSiteOrigin();
-  const urls = new Set<string>([
-    `${canonical}/auth/callback`,
-    "http://localhost:3000/auth/callback",
-    "http://127.0.0.1:3000/auth/callback",
-    "https://hub-of-craftss.shaarunew01.workers.dev/auth/callback",
-    "https://hub-of-craftss.hubofcraftss.workers.dev/auth/callback",
-  ]);
-
-  try {
-    const host = new URL(canonical).host;
-    if (host.startsWith("www.")) {
-      urls.add(`https://${host.replace(/^www\./, "")}/auth/callback`);
-    } else {
-      urls.add(`https://www.${host}/auth/callback`);
-    }
-  } catch {
-    /* ignore invalid canonical URL */
-  }
-
+  const urls = new Set(getAllowedAuthCallbackUrls());
+  urls.add(`${getCanonicalSiteOrigin()}/auth/callback`);
   return [...urls];
 }

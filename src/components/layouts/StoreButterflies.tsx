@@ -25,12 +25,12 @@ function randomPose(prev?: ButterflyPose): ButterflyPose {
 
 function RealisticButterfly({ variant }: { variant: "rose" | "lavender" }) {
   const isRose = variant === "rose";
-  const upper = isRose ? "#e070a8" : "#8b6fc4";
-  const upperDeep = isRose ? "#c03078" : "#6a4aa8";
-  const lower = isRose ? "#f0a8c8" : "#b8a0e0";
-  const spot = isRose ? "#fff5fa" : "#f3ecff";
-  const body = isRose ? "#5c2a40" : "#3d2a55";
-  const accent = isRose ? "#f5d06a" : "#e8c86a";
+  const upper = isRose ? "#ff4d57" : "#8b6fc4";
+  const upperDeep = isRose ? "#e30613" : "#6a4aa8";
+  const lower = isRose ? "#ff8a90" : "#b8a0e0";
+  const spot = isRose ? "#fff8f0" : "#f3ecff";
+  const body = isRose ? "#9b0c14" : "#3d2a55";
+  const accent = isRose ? "#f5d000" : "#e8c86a";
 
   return (
     <svg

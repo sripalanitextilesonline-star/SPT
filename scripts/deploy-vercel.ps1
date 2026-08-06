@@ -1,8 +1,13 @@
 # Run after: vercel login (and from project root)
-# Pushes .env.local vars to Vercel, deploys production, sets SITE_URL to deployment URL.
+# Pushes .env.local vars to Vercel and deploys production for Sri Palani Textiles.
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot + "\.."
+
+node scripts/validate-project-identity.mjs
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "project identity validation failed"
+}
 
 if (-not (Test-Path ".env.local")) {
   Write-Error ".env.local not found"
@@ -32,9 +37,5 @@ Write-Host "Deploying to production..."
 $deployUrl = (vercel deploy --prod --yes 2>&1 | Select-String -Pattern "https://\S+" | Select-Object -Last 1).ToString().Trim()
 if ($deployUrl) {
   Write-Host "Deployed: $deployUrl"
-  Write-Host "Updating NEXT_PUBLIC_SITE_URL..."
-  $deployUrl | vercel env add NEXT_PUBLIC_SITE_URL production --force
-  vercel deploy --prod --yes
 }
-
-Write-Host "Done. Add this URL in Supabase Auth -> URL Configuration (Site URL + Redirect URLs)."
+Write-Host "Done. NEXT_PUBLIC_SITE_URL should stay pinned to the canonical production domain in project.identity.json."

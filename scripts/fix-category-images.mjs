@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
 const SAKTHI_MEDIA_BASE =
-  "https://qhtwwyqlsnckorndmhmt.supabase.co/storage/v1/object/public/media/sakthi/";
+  "";
 
 const SAREE_SHOP_MODEL_IMAGES = [
   `${SAKTHI_MEDIA_BASE}saree-R-tapgdDCDppiSQlGdkRl.webp`,

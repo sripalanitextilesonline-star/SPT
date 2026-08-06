@@ -14,7 +14,7 @@ export default function AboutPage() {
   return (
     <InfoPage
       heading="Our Story"
-      description={`${siteConfig.name} by Shaaru — ${siteConfig.tagline}.`}
+      description={`${siteConfig.name}  — ${siteConfig.tagline}.`}
     >
       <p>
         {siteConfig.name} is your hub for terracotta raw materials and art &amp;

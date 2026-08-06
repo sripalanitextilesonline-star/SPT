@@ -1,4 +1,5 @@
 import { siteConfig } from "@/config/site";
+import { BRAND_LOGO } from "@/lib/brand/logo";
 
 export type HeroSlide = {
   id: string;
@@ -10,33 +11,35 @@ export type HeroSlide = {
   imageAlt: string;
 };
 
-/** Homepage hero fallback until Admin → Home Banner uploads craft photos. */
+const CDN = "https://pub-65f24d69fb304b0b87901be92e533cb1.r2.dev";
+
+/** Homepage hero — brand logo + sample saree photos. */
 export const heroSlides: HeroSlide[] = [
   {
-    id: "terracotta",
-    title: "Terracotta materials",
-    subtitle: "Raw materials for jewellery and craft projects",
+    id: "brand",
+    title: siteConfig.name,
+    subtitle: siteConfig.tagline,
     href: "/shop",
     cta: "Shop now",
-    image: "/images/hub-of-craftss-logo.png",
-    imageAlt: `${siteConfig.name} — terracotta craft supplies`,
+    image: BRAND_LOGO.src,
+    imageAlt: `${siteConfig.name} — ${siteConfig.tagline}`,
   },
   {
-    id: "art-supplies",
-    title: "Art & craft supplies",
-    subtitle: "Make · Craft · Create with quality supplies",
+    id: "silk-sarees",
+    title: "Silk sarees",
+    subtitle: "Wedding and festive silk collections",
+    href: "/shop",
+    cta: "Shop now",
+    image: `${CDN}/public/silk-sarees.jpg`,
+    imageAlt: `${siteConfig.name} — silk sarees`,
+  },
+  {
+    id: "cotton-sarees",
+    title: "Cotton & everyday wear",
+    subtitle: "Comfortable cotton and silk-cotton sarees",
     href: "/collections",
     cta: "Explore",
-    image: "/images/hub-of-craftss-logo.png",
-    imageAlt: `${siteConfig.name} — art and craft supplies`,
-  },
-  {
-    id: "madurai-hub",
-    title: "From Madurai",
-    subtitle: "Hub of craftss by Shaaru — Sarojini Nagar",
-    href: "/about",
-    cta: "Our story",
-    image: "/images/hub-of-craftss-logo.png",
-    imageAlt: `${siteConfig.name} — Madurai craft shop`,
+    image: `${CDN}/public/cotton-sarees.jpg`,
+    imageAlt: `${siteConfig.name} — cotton sarees`,
   },
 ];

@@ -5,10 +5,14 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  fail,
+  getProjectIdentity,
+  getRepoRoot,
+} from "./lib/project-identity.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
+const root = getRepoRoot();
+const identity = getProjectIdentity();
 
 const DEFAULT_CONFIG = "wrangler.workers.new-account.jsonc";
 const configArg = process.argv[2] || DEFAULT_CONFIG;
@@ -22,11 +26,6 @@ function stripJsonc(raw) {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
-function fail(message) {
-  console.error(`[validate-wrangler] ${message}`);
-  process.exit(1);
-}
-
 if (!fs.existsSync(configPath)) {
   fail(`Missing config file: ${configPath}`);
 }
@@ -38,8 +37,10 @@ try {
   fail(`Invalid JSONC in ${configPath}: ${error instanceof Error ? error.message : error}`);
 }
 
-if (config.name !== "hub-of-craftss") {
-  fail(`Expected worker name "hub-of-craftss", got "${config.name}"`);
+if (config.name !== identity.cloudflare.workers.storefront.name) {
+  fail(
+    `Expected worker name "${identity.cloudflare.workers.storefront.name}", got "${config.name}"`,
+  );
 }
 
 if (config.assets?.run_worker_first !== false) {
@@ -67,6 +68,10 @@ const hasMigration = (config.migrations || []).some((migration) =>
 );
 if (!hasMigration) {
   fail("Missing DOQueueHandler sqlite migration for OpenNext cache queue");
+}
+
+if (config.account_id !== identity.cloudflare.accountId) {
+  fail(`Expected account_id "${identity.cloudflare.accountId}", got "${config.account_id}"`);
 }
 
 console.log(`[validate-wrangler] OK ${path.relative(root, configPath)}`);

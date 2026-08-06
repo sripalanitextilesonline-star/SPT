@@ -1,5 +1,5 @@
 -- =============================================================================
--- Sakthi Textiles – Customer testimonials (home carousel + admin)
+-- Sri Palani Textiles – Customer testimonials (home carousel + admin)
 -- Run: npm run db:migrate-testimonials
 -- Safe to re-run (IF NOT EXISTS / ON CONFLICT where noted)
 -- =============================================================================

@@ -1,13 +1,13 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "hub-of-craftss-media",
-  "account_id": "542992b23690c0c07bb23e5fecffa6ec",
+  "name": "spt-media",
+  "account_id": "aaa80267f9d75b8a485ef7139a1e9256",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-05",
   "r2_buckets": [
     {
       "binding": "MEDIA_BUCKET",
-      "bucket_name": "hubofcraftss-cdn"
+      "bucket_name": "spt-cdn"
     }
   ],
   "observability": {

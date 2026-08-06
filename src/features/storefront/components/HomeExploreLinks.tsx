@@ -11,7 +11,7 @@ export function HomeExploreLinks() {
         id="explore-hoc-heading"
         className="font-[family-name:var(--font-hero-serif)] text-xl font-semibold text-foreground md:text-2xl"
       >
-        Explore Hub of craftss
+        Explore Sri Palani Textiles
       </h2>
       <p className="mt-2 max-w-2xl text-sm text-muted-foreground md:text-base">
         Shop terracotta raw materials and art & craft supplies online, browse

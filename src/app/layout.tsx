@@ -16,13 +16,13 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   keywords: [
-    "Hub of craftss",
-    "HOC",
-    "terracotta",
-    "art and craft supplies",
-    "craft materials Madurai",
-    "Shaaru crafts",
-    "make craft create",
+    "Sri Palani Textiles",
+    "SPT",
+    "sarees",
+    "silk sarees",
+    "cotton sarees",
+    "wedding sarees",
+    "Tamil Nadu textiles",
   ],
   applicationName: siteConfig.name,
   authors: [{ name: siteConfig.name }],
@@ -40,11 +40,20 @@ export const metadata: Metadata = {
     siteName: siteConfig.name,
     title: `${siteConfig.name} | ${siteConfig.tagline}`,
     description: siteConfig.description,
+    images: [
+      {
+        url: "/images/sri-palani-textiles-logo.png",
+        width: 464,
+        height: 193,
+        alt: siteConfig.name,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: `${siteConfig.name} | ${siteConfig.tagline}`,
     description: siteConfig.description,
+    images: ["/images/sri-palani-textiles-logo.png"],
   },
   robots: {
     index: true,
@@ -61,9 +70,19 @@ export const metadata: Metadata = {
     canonical: siteUrl,
   },
   icons: {
-    icon: [{ url: "/images/hub-of-craftss-logo.png", type: "image/png" }],
-    shortcut: ["/images/hub-of-craftss-logo.png"],
-    apple: [{ url: "/images/hub-of-craftss-logo.png", type: "image/png" }],
+    icon: [
+      { url: "/images/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/images/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/images/sri-palani-textiles-logo.png", type: "image/png" },
+    ],
+    shortcut: ["/images/favicon-32.png"],
+    apple: [
+      {
+        url: "/images/apple-touch-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
 };
 

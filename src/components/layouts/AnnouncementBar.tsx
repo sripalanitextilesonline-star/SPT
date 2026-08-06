@@ -19,12 +19,12 @@ function isExternalHref(href: string) {
 
 function MarqueeItem({ item }: { item: Announcement }) {
   const className =
-    "inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs text-foreground/90 transition-opacity hover:text-foreground sm:text-sm";
+    "inline-flex shrink-0 items-center gap-2 whitespace-nowrap text-xs font-medium text-brand-gold/95 transition-opacity hover:text-brand-gold sm:text-sm";
 
   const content = (
     <>
       <span>{item.text}</span>
-      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wider text-brand-rose sm:text-[11px]">
+      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wider text-white sm:text-[11px]">
         {item.cta}
         <ChevronRight className="h-3 w-3" strokeWidth={2.5} aria-hidden />
       </span>
@@ -78,7 +78,7 @@ function MarqueeStrip({
   );
 }
 
-function CraftAnnouncementShell({
+function BrandAnnouncementShell({
   children,
   className,
   label,
@@ -89,11 +89,10 @@ function CraftAnnouncementShell({
 }) {
   return (
     <div
-      className={cn("announcement-craft group/announcement", className)}
+      className={cn("announcement-bar group/announcement", className)}
       aria-label={label}
     >
-      <div className="announcement-bunting" aria-hidden />
-      <div className="announcement-craft-rail">{children}</div>
+      <div className="announcement-bar-rail">{children}</div>
     </div>
   );
 }
@@ -105,16 +104,16 @@ export function AnnouncementBar() {
   if (items.length === 1) {
     const item = items[0];
     return (
-      <CraftAnnouncementShell>
+      <BrandAnnouncementShell>
         <div className="flex h-[var(--announcement-rail-height)] items-center justify-center gap-2 px-3 sm:px-4">
           <MarqueeItem item={item} />
         </div>
-      </CraftAnnouncementShell>
+      </BrandAnnouncementShell>
     );
   }
 
   return (
-    <CraftAnnouncementShell label="Store announcements">
+    <BrandAnnouncementShell label="Store announcements">
       <div className="flex h-[var(--announcement-rail-height)] items-center">
         <div className="announcement-marquee-mask relative min-w-0 flex-1 overflow-hidden">
           <div
@@ -129,6 +128,6 @@ export function AnnouncementBar() {
           </div>
         </div>
       </div>
-    </CraftAnnouncementShell>
+    </BrandAnnouncementShell>
   );
 }

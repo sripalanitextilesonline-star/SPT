@@ -6,8 +6,8 @@ import OAuthLoginButtons from "@/features/auth/components/OAuthLoginButtons";
 import { SigninForm } from "@/features/auth";
 
 export const metadata: Metadata = {
-  title: "Sign In | Hub of craftss",
-  description: "Sign in to your Hub of craftss account",
+  title: "Sign In | Sri Palani Textiles",
+  description: "Sign in to your Sri Palani Textiles account",
 };
 
 type SignInPageProps = {
@@ -32,7 +32,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             Sign in
           </h1>
           <p className="text-sm text-muted-foreground">
-            Welcome back to Hub of craftss
+            Welcome back to Sri Palani Textiles
           </p>
         </div>
       </div>

@@ -1,0 +1,13 @@
+---
+description: Keep Sri Palani Textiles identity pinned and centralized
+alwaysApply: true
+---
+
+# Project Identity First
+
+- Treat `project.identity.json` as the non-secret source of truth for project identity.
+- Before adding or changing domains, Supabase refs, Cloudflare account IDs, worker names, bucket names, Vercel IDs, or GitHub repo references, update `project.identity.json` first.
+- Reuse `src/lib/project/identity.ts` in app code and `scripts/lib/project-identity.mjs` in scripts instead of hardcoding identity values.
+- Do not commit secrets to git. Identity files may only contain non-secret pins.
+- Before deploy/auth/config changes, run or preserve `npm run identity:validate`.
+- Remove or reject legacy identifiers listed under `project.identity.json.forbidden`.

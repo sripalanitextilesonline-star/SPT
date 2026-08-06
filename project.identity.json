@@ -1,0 +1,98 @@
+{
+  "$schema": "./project.identity.schema.json",
+  "project": {
+    "name": "Sri Palani Textiles",
+    "shortName": "SPT",
+    "slug": "sri-palani-textiles",
+    "packageName": "sri-palani-textiles"
+  },
+  "site": {
+    "canonicalUrl": "https://sripalanitextiles.com",
+    "productionOrigins": [
+      "https://sripalanitextiles.com",
+      "https://www.sripalanitextiles.com",
+      "https://sri-palani-textiles.vercel.app"
+    ],
+    "localOrigins": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "previewOriginPatterns": [
+      "https://*.vercel.app"
+    ],
+    "authRedirectOrigins": [
+      "https://sripalanitextiles.com",
+      "https://www.sripalanitextiles.com",
+      "https://sri-palani-textiles.vercel.app",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ]
+  },
+  "supabase": {
+    "projectRef": "xsatfugvvorelzeyyzwp",
+    "url": "https://xsatfugvvorelzeyyzwp.supabase.co",
+    "configPath": "supabase/config.toml"
+  },
+  "cloudflare": {
+    "accountEmail": "sripalanitextilesonline@gmail.com",
+    "accountId": "aaa80267f9d75b8a485ef7139a1e9256",
+    "workers": {
+      "storefront": {
+        "name": "sri-palani-textiles",
+        "configPaths": [
+          "wrangler.workers.jsonc",
+          "wrangler.workers.new-account.jsonc"
+        ]
+      },
+      "mediaProxy": {
+        "name": "spt-media",
+        "configPaths": [
+          "workers/r2-media-proxy/wrangler.jsonc"
+        ]
+      },
+      "legacyPages": {
+        "name": "sri-palani-textiles-pages",
+        "configPaths": [
+          "wrangler.jsonc"
+        ]
+      }
+    },
+    "r2": {
+      "bucket": "spt-cdn",
+      "cacheBucket": "spt-next-cache",
+      "endpoint": "https://aaa80267f9d75b8a485ef7139a1e9256.r2.cloudflarestorage.com",
+      "publicCdnUrl": "https://pub-65f24d69fb304b0b87901be92e533cb1.r2.dev"
+    }
+  },
+  "vercel": {
+    "teamId": "team_x5P3xflwaglYdNIbYNc3RHfC",
+    "projectId": "prj_NLya0v0DC2NVvjLWrzw7ScirzK39",
+    "projectName": "sri-palani-textiles",
+    "configPath": "vercel.json"
+  },
+  "github": {
+    "owner": "sripalanitextilesonline-star",
+    "repo": "SPT",
+    "pushAccount": "sripalanitextilesonline-star",
+    "remoteUrl": "https://github.com/sripalanitextilesonline-star/SPT.git"
+  },
+  "forbidden": {
+    "domains": [
+      "hubsofcraftss.com",
+      "sairaghavendratex.com",
+      "www.sairaghavendratex.com",
+      "ssr-tex-shop.vercel.app",
+      "software-saree-order.vercel.app"
+    ],
+    "supabaseProjectRefs": [
+      "rzwbpjjayarptlwjfpzm"
+    ],
+    "cloudflareAccountIds": [],
+    "workerNames": [
+      "hub-of-craftss"
+    ],
+    "githubRepos": [
+      "sanjaycyberaudit-svg/Hub-of-craftss"
+    ]
+  }
+}

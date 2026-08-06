@@ -65,10 +65,3 @@ export interface CheckoutItem extends CartItem {
 //   > {
 //   storeName: string | null
 // }
-
-export type SubscriptionPlan = {
-  name: string;
-  description: string;
-  stripePriceId: string;
-  monthlyPrice?: number | null;
-};

@@ -1,4 +1,4 @@
-![og-image](https://hiyori-backpack.s3.us-west-2.amazonaws.com/Hiyori-nextjs-supabase-graphql-og.jpg)
+![og-image](https://spt-cdn.s3.us-west-2.amazonaws.com/Hiyori-nextjs-supabase-graphql-og.jpg)
 
 > We are Keep developing the project.
 
@@ -11,7 +11,7 @@
 ## Features
 
 - **Searching Feature with GraphQL**: Dynamic and efficient searching, allowing complex queries with optimized data fetching.
-- **Stripe Checkout with Webhooks**: Seamless payment processing integrated with real-time notifications for automated order and inventory management.
+- **Cashfree Checkout with Webhooks**: Payment processing for India with order and inventory updates.
 - **Custom CMS**: Easy management for orders, users, products, and collections through a user-friendly interface designed for e-commerce.
 - **Next.js 14 AppDir Support**: Utilizes the latest Next.js features for improved routing, page organization, and performance.
 - **Authentication**: Secure login options using credentials or OAuth with Google, ensuring flexibility and security.
@@ -23,6 +23,10 @@
 - **Middleware for Admin Page and Route Protection**: Secures sensitive areas with custom middleware, restricting access to authorized users.
 - **Responsive Design**: Ensures an optimal viewing experience across all devices, from desktops to smartphones.
 - **SEO**: Implements best practices for search engine optimization to improve visibility and drive organic traffic.
+
+## Project Identity
+
+This repo uses `project.identity.json` as the non-secret source of truth for canonical domains, Supabase/Cloudflare/Vercel/GitHub identifiers, and forbidden legacy refs. Run `npm run identity:validate` before deploy/auth/config work. See `docs/project-identity.md`.
 
 ## Upcoming Feature
 

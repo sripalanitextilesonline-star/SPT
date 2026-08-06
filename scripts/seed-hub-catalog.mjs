@@ -1,5 +1,5 @@
 /**
- * Seed starter Hub of craftss collections, products, and testimonials.
+ * Seed starter Sri Palani Textiles collections, products, and testimonials.
  * Safe to re-run (upsert by fixed ids).
  *
  * Usage: node scripts/seed-hub-catalog.mjs
@@ -16,7 +16,7 @@ const sql = postgres(process.env.DATABASE_URL, {
 });
 
 /** Local public asset — avoids broken /_next/image remote host errors */
-const LOGO = "/images/hub-of-craftss-logo.png";
+const LOGO = "/images/sri-palani-textiles-logo.png";
 
 const collections = [
   {
@@ -25,7 +25,7 @@ const collections = [
     slug: "terracotta-materials",
     title: "Terracotta materials",
     description:
-      "Raw terracotta materials for jewellery and craft projects at Hub of craftss.",
+      "Raw terracotta materials for jewellery and craft projects at Sri Palani Textiles.",
     order: 10,
     mediaId: "hoc-media-terracotta",
   },
@@ -134,7 +134,7 @@ const testimonials = [
     customerName: "Priya S.",
     location: "Madurai, Tamil Nadu",
     quote:
-      "Loved the terracotta materials from Hub of craftss — perfect for my jewellery workshop.",
+      "Loved the terracotta materials from Sri Palani Textiles — perfect for my jewellery workshop.",
     order: 10,
     mediaId: "hoc-media-t1",
   },
@@ -143,7 +143,7 @@ const testimonials = [
     customerName: "Anitha R.",
     location: "Chennai, Tamil Nadu",
     quote:
-      "Quality craft supplies and friendly guidance from Shaaru. Make · Craft · Create for real!",
+      "Quality craft supplies and friendly guidance from Sri Palani Textiles. Make · Craft · Create for real!",
     order: 9,
     mediaId: "hoc-media-t2",
   },
@@ -178,7 +178,7 @@ async function upsertMedia(id, alt) {
 }
 
 for (const c of collections) {
-  await upsertMedia(c.mediaId, `${c.label} — Hub of craftss`);
+  await upsertMedia(c.mediaId, `${c.label} — Sri Palani Textiles`);
   await sql`
     insert into collections (id, label, slug, title, description, "order", featured_image_id)
     values (
@@ -197,7 +197,7 @@ for (const c of collections) {
 }
 
 for (const p of products) {
-  await upsertMedia(p.mediaId, `${p.name} — Hub of craftss`);
+  await upsertMedia(p.mediaId, `${p.name} — Sri Palani Textiles`);
   await sql`
     insert into products (
       id, name, slug, product_code, description, featured, price, stock,

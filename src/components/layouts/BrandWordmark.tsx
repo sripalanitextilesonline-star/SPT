@@ -12,7 +12,7 @@ type Props = {
   align?: "left" | "center";
 };
 
-/** Hub of craftss logo lockup — fixed height so header width cannot shrink it. */
+/** Sri Palani Textiles logo lockup — fixed height so header width cannot shrink it. */
 export function BrandWordmark({
   className,
   size = "md",

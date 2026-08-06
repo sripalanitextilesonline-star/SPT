@@ -32,11 +32,6 @@ const nextConfig = {
     formats: ["image/avif", "image/webp"],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 320, 384, 400],
     remotePatterns: [
-      // Demo images (HiyoRi default S3)
-      {
-        protocol: "https",
-        hostname: "hiyori-backpack.s3.us-west-2.amazonaws.com",
-      },
       // Your S3 bucket when configured in .env.local
       ...(process.env.NEXT_PUBLIC_S3_BUCKET &&
       process.env.NEXT_PUBLIC_S3_BUCKET !== "placeholder"
@@ -84,27 +79,6 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: "vumbnail.com",
-      },
-      // Legacy Workers hosts (seeded absolute image URLs) + current account subdomain
-      {
-        protocol: "https",
-        hostname: "hub-of-craftss.hubofcraftss.workers.dev",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "hub-of-craftss.shaarunew01.workers.dev",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "hubsofcraftss.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "www.hubsofcraftss.com",
-        pathname: "/**",
       },
     ],
   },

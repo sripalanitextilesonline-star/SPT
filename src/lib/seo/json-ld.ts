@@ -19,7 +19,7 @@ export function buildOrganizationJsonLd() {
     "@type": "Organization",
     name: siteConfig.name.replace("®", "").trim(),
     url: absoluteUrl(),
-    logo: absoluteUrl("/images/hub-of-craftss-logo.png"),
+    logo: absoluteUrl("/images/sri-palani-textiles-logo.png"),
     email: siteConfig.email || undefined,
     telephone: siteConfig.phone || undefined,
     address: {
@@ -59,7 +59,7 @@ export function buildStoreJsonLd() {
     "@type": "Store",
     name: siteConfig.name.replace("®", "").trim(),
     url: absoluteUrl(),
-    image: absoluteUrl("/images/hub-of-craftss-logo.png"),
+    image: absoluteUrl("/images/sri-palani-textiles-logo.png"),
     telephone: siteConfig.phone || undefined,
     email: siteConfig.email || undefined,
     address: {
@@ -78,7 +78,7 @@ export function buildSiteNavigationJsonLd() {
   return {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    name: "Hub of craftss primary navigation",
+    name: "Sri Palani Textiles primary navigation",
     itemListElement: SEO_PRIMARY_NAV.map((item, index) => ({
       "@type": "SiteNavigationElement",
       position: index + 1,
@@ -116,7 +116,8 @@ export function buildProductJsonLd(input: {
     "@context": "https://schema.org",
     "@type": "Product",
     name: input.name,
-    description: input.description ?? `Buy ${input.name} from Hub of craftss.`,
+    description:
+      input.description ?? `Buy ${input.name} from Sri Palani Textiles.`,
     image: input.imageUrl ? [input.imageUrl] : undefined,
     sku: input.slug,
     brand: {

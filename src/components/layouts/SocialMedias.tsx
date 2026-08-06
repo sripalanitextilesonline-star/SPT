@@ -76,7 +76,7 @@ function SocialMedias({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            aria-label={`${label} — Hub of craftss`}
+            aria-label={`${label} — Sri Palani Textiles`}
             title={label}
             className="rounded-md p-0.5 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >

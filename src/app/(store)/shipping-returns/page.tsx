@@ -14,9 +14,9 @@ import { Metadata } from "next";
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: "Shipping & Returns | Hub of craftss",
+  title: "Shipping & Returns | Sri Palani Textiles",
   description:
-    "Simple order processing and delivery times for Hub of craftss — Tamil Nadu, India, and international.",
+    "Simple order processing and delivery times for Sri Palani Textiles — Tamil Nadu, India, and international.",
 };
 
 export default async function ShippingReturnsPage() {

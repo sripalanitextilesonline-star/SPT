@@ -11,47 +11,24 @@
  * Run: node scripts/setup-auth-config.mjs
  */
 import dotenv from "dotenv";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import {
+  getAuthRedirectUrls,
+  getCanonicalSiteUrl,
+  getProjectIdentity,
+  resolveFromRoot,
+} from "./lib/project-identity.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-dotenv.config({ path: join(root, ".env.local") });
+dotenv.config({ path: resolveFromRoot(".env.local") });
 
-const projectRef = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_REF;
+const identity = getProjectIdentity();
+const projectRef =
+  process.env.NEXT_PUBLIC_SUPABASE_PROJECT_REF?.trim() ||
+  identity.supabase.projectRef;
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN?.trim();
 const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
-const siteUrl = (
-  process.env.SUPABASE_SITE_URL?.trim() ||
-  process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
-  "https://sairaghavendratex.com"
-).replace(/\/$/, "");
-
-function authCallback(origin) {
-  return `${origin.replace(/\/$/, "")}/auth/callback`;
-}
-
-const redirectOrigins = new Set([
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://ssr-tex-shop.vercel.app",
-  siteUrl,
-]);
-
-try {
-  const host = new URL(siteUrl).host;
-  if (host.startsWith("www.")) {
-    redirectOrigins.add(`https://${host.replace(/^www\./, "")}`);
-  } else {
-    redirectOrigins.add(`https://www.${host}`);
-  }
-} catch {
-  /* ignore */
-}
-
-const redirectAllowList = [...redirectOrigins]
-  .map((origin) => authCallback(origin))
-  .join(",");
+const siteUrl = getCanonicalSiteUrl();
+const redirectAllowList = getAuthRedirectUrls().join(",");
 
 function missing(label) {
   console.error(`Missing ${label}. Add it to .env.local and run again.`);
@@ -60,6 +37,12 @@ function missing(label) {
 
 if (!projectRef) missing("NEXT_PUBLIC_SUPABASE_PROJECT_REF");
 if (!accessToken) missing("SUPABASE_ACCESS_TOKEN");
+if (projectRef !== identity.supabase.projectRef) {
+  console.error(
+    `NEXT_PUBLIC_SUPABASE_PROJECT_REF must be ${identity.supabase.projectRef}, got ${projectRef}`,
+  );
+  process.exit(1);
+}
 
 const apiBase = "https://api.supabase.com/v1";
 
@@ -74,7 +57,9 @@ async function api(path, options = {}) {
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`${options.method ?? "GET"} ${path} → ${res.status}: ${text}`);
+    throw new Error(
+      `${options.method ?? "GET"} ${path} -> ${res.status}: ${text}`,
+    );
   }
   return text ? JSON.parse(text) : {};
 }

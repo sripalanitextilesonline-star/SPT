@@ -1,5 +1,5 @@
 /**
- * Create Hub of craftss admin user (idempotent).
+ * Create Sri Palani Textiles admin user (idempotent).
  * Usage: node scripts/create-hub-admin.mjs
  */
 import dotenv from "dotenv";
@@ -75,4 +75,4 @@ if (profileErr) {
 }
 
 console.log("Admin ready:", email);
-console.log("Sign in at: https://hub-of-craftss.hubofcraftss.workers.dev/sign-in");
+console.log("Sign in at: http://localhost:3000/sign-in");

@@ -64,7 +64,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (productName) {
     const productDescription =
       data?.productsCollection?.edges?.[0]?.node?.description?.trim() ||
-      `Buy ${productName} online from Hub of craftss. Premium terracotta and craft supplies with secure checkout.`;
+      `Buy ${productName} online from Sri Palani Textiles. Premium terracotta and craft supplies with secure checkout.`;
     return {
       title: productName,
       description: productDescription,
@@ -72,7 +72,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         canonical: path,
       },
       openGraph: {
-        title: `${productName} | Hub of craftss`,
+        title: `${productName} | Sri Palani Textiles`,
         description: productDescription,
         url: path,
       },
@@ -80,7 +80,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   return {
-    title: "Hub of craftss | Art & Craft Supplies",
+    title: "Sri Palani Textiles | Art & Craft Supplies",
     description:
       "Authentic terracotta and craft supplies — wholesale and retail",
   };
@@ -140,7 +140,7 @@ async function ProductDetailPage({ params }: Props) {
       )
     : pricingProduct;
 
-  const storefrontSizeLabels = (sizeConfig.groups?.length
+  const storefrontSizeLabels = sizeConfig.groups?.length
     ? sizeConfig.groups.flatMap((group) =>
         group.options
           .filter((option) => Number(option.qty ?? 0) > 0)
@@ -167,7 +167,7 @@ async function ProductDetailPage({ params }: Props) {
           if (!value) return `${option.qty}`;
           if (/^[A-Z]+$/.test(value)) return `${value} : ${option.qty}`;
           return value;
-        }));
+        });
 
   const availableLabel =
     (sizeConfig.groups?.length ?? 0) > 1

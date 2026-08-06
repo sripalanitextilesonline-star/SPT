@@ -50,7 +50,7 @@ BEGIN
       SET
         label = lbl,
         title = lbl,
-        description = 'Explore our ' || lbl || ' at Sakthi Textiles.',
+        description = 'Explore our ' || lbl || ' at Sri Palani Textiles.',
         "order" = ord
       WHERE c.slug = collection_slug;
       CONTINUE;
@@ -71,7 +71,7 @@ BEGIN
       lbl,
       collection_slug,
       lbl,
-      'Explore our ' || lbl || ' at Sakthi Textiles.',
+      'Explore our ' || lbl || ' at Sri Palani Textiles.',
       ord,
       media_id
     );

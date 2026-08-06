@@ -19,8 +19,7 @@ if (!url) {
 
 const sql = postgres(url, { max: 1 });
 
-const SAKTHI_MEDIA_BASE =
-  "https://qhtwwyqlsnckorndmhmt.supabase.co/storage/v1/object/public/media/sakthi/";
+const SAKTHI_MEDIA_BASE = "";
 
 const TESTIMONIAL_IMAGES = [
   `${SAKTHI_MEDIA_BASE}saree-R-tapgdDCDppiSQlGdkRl.webp`,

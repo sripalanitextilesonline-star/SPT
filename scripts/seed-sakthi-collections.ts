@@ -1,5 +1,5 @@
 /**
- * Add Sakthi Textiles saree categories to Supabase (safe upsert — does not delete products).
+ * Add Sri Palani Textiles saree categories to Supabase (safe upsert — does not delete products).
  *
  * Usage:
  *   npm run db:seed-collections

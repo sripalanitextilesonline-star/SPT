@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sripalanitextiles.com/project.identity.schema.json",
+  "title": "Project Identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "project",
+    "site",
+    "supabase",
+    "cloudflare",
+    "vercel",
+    "github",
+    "forbidden"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "shortName", "slug", "packageName"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "shortName": { "type": "string", "minLength": 1 },
+        "slug": { "type": "string", "minLength": 1 },
+        "packageName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalUrl",
+        "productionOrigins",
+        "localOrigins",
+        "previewOriginPatterns",
+        "authRedirectOrigins"
+      ],
+      "properties": {
+        "canonicalUrl": { "type": "string", "format": "uri" },
+        "productionOrigins": { "$ref": "#/$defs/stringArray" },
+        "localOrigins": { "$ref": "#/$defs/stringArray" },
+        "previewOriginPatterns": { "$ref": "#/$defs/stringArray" },
+        "authRedirectOrigins": { "$ref": "#/$defs/stringArray" }
+      }
+    },
+    "supabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectRef", "url", "configPath"],
+      "properties": {
+        "projectRef": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "configPath": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cloudflare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountEmail", "accountId", "workers", "r2"],
+      "properties": {
+        "accountEmail": { "type": "string", "minLength": 1 },
+        "accountId": { "type": "string", "minLength": 1 },
+        "workers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["storefront", "mediaProxy", "legacyPages"],
+          "properties": {
+            "storefront": { "$ref": "#/$defs/workerIdentity" },
+            "mediaProxy": { "$ref": "#/$defs/workerIdentity" },
+            "legacyPages": { "$ref": "#/$defs/workerIdentity" }
+          }
+        },
+        "r2": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bucket", "cacheBucket", "endpoint", "publicCdnUrl"],
+          "properties": {
+            "bucket": { "type": "string", "minLength": 1 },
+            "cacheBucket": { "type": "string", "minLength": 1 },
+            "endpoint": { "type": "string", "format": "uri" },
+            "publicCdnUrl": { "type": "string", "format": "uri" }
+          }
+        }
+      }
+    },
+    "vercel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["teamId", "projectId", "projectName", "configPath"],
+      "properties": {
+        "teamId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string", "minLength": 1 },
+        "projectName": { "type": "string", "minLength": 1 },
+        "configPath": { "type": "string", "minLength": 1 }
+      }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "repo", "pushAccount", "remoteUrl"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "pushAccount": { "type": "string", "minLength": 1 },
+        "remoteUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "forbidden": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domains",
+        "supabaseProjectRefs",
+        "cloudflareAccountIds",
+        "workerNames",
+        "githubRepos"
+      ],
+      "properties": {
+        "domains": { "$ref": "#/$defs/stringArray" },
+        "supabaseProjectRefs": { "$ref": "#/$defs/stringArray" },
+        "cloudflareAccountIds": { "$ref": "#/$defs/stringArray" },
+        "workerNames": { "$ref": "#/$defs/stringArray" },
+        "githubRepos": { "$ref": "#/$defs/stringArray" }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "workerIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "configPaths"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "configPaths": { "$ref": "#/$defs/stringArray" }
+      }
+    }
+  }
+}

@@ -23,7 +23,7 @@ export const getURL = () => {
   return getCanonicalSiteBaseUrl();
 };
 
-const DEMO_S3_BUCKET = "hiyori-backpack";
+const DEMO_S3_BUCKET = "spt-cdn";
 const DEMO_S3_REGION = "us-west-2";
 
 /** Public bucket for Sakthi product/collection photos (Supabase Storage). */
@@ -64,7 +64,7 @@ export const keytoUrl = (key?: string) => {
     return key;
   }
 
-  // Local public assets (e.g. /images/hub-of-craftss-logo.png)
+  // Local public assets (e.g. /images/sri-palani-textiles-logo.png)
   if (key.startsWith("/")) {
     return key;
   }

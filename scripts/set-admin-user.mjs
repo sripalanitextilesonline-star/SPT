@@ -67,7 +67,7 @@ if (!user) {
     email,
     password,
     email_confirm: true,
-    user_metadata: { name: "Shaaru" },
+    user_metadata: { name: "Sri Palani Textiles" },
     app_metadata: { isAdmin: true },
   });
   if (error) {
@@ -92,7 +92,7 @@ if (!user) {
 const { error: profileErr } = await supabase.from("profiles").upsert({
   id: user.id,
   email,
-  name: "Shaaru",
+  name: "Sri Palani Textiles",
   is_admin: true,
 });
 if (profileErr) {

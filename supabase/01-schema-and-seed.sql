@@ -1,7 +1,7 @@
 -- =============================================================================
--- Sakthi Textiles – HiyoRi database setup
+-- Sri Palani Textiles – HiyoRi database setup
 -- Run in Supabase Dashboard → SQL Editor → New query → Run
--- Project: qhtwwyqlsnckorndmhmt
+-- Project: YOUR_SUPABASE_PROJECT_REF
 -- =============================================================================
 -- SAFE: Drops app tables only (not auth.users). Run once on a fresh project.
 -- =============================================================================
@@ -224,7 +224,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON address TO authenticated;
 GRANT SELECT ON address TO anon;
 
 -- -----------------------------------------------------------------------------
--- 5. SEED DATA – Sakthi Textiles (saree categories + sample products)
+-- 5. SEED DATA – Sri Palani Textiles (saree categories + sample products)
 -- -----------------------------------------------------------------------------
 INSERT INTO medias (id, key, alt) VALUES
   ('m1', 'public/silk-sarees.jpg', 'Silk Sarees'),

@@ -2,17 +2,13 @@ import type { NavItemWithOptionalChildren } from "@/types";
 
 export type SiteConfig = typeof siteConfig;
 
-/** Hub of craftss — Madurai */
-const ADDRESS_LINES = [
-  "No 162, Kasim Residency",
-  "Sarojini Nagar",
-  "Madurai – 625107, Tamil Nadu",
-] as const;
+/** Sri Palani Textiles */
+const ADDRESS_LINES = ["Address line 1", "City – PIN, Tamil Nadu"] as const;
 
 /** Contacts — add phone/WhatsApp when available */
 const CONTACTS = [
   {
-    name: "Shaaru",
+    name: "Sri Palani Textiles",
     phone: "",
     phoneHref: "",
   },
@@ -24,7 +20,7 @@ const EMAIL = "";
 const GSTIN = "";
 
 const SOCIAL = {
-  instagram: "https://www.instagram.com/hub_of_craftss_by_shaaru/",
+  instagram: "",
   youtube: "",
   facebook: "",
   whatsapp: "",
@@ -32,16 +28,16 @@ const SOCIAL = {
 
 export const siteConfig = {
   /** Title-case shop board line (navbar/footer wordmark) */
-  shopBoardName: "Hub of craftss",
-  name: "Hub of craftss",
-  shortName: "HOC",
-  tagline: "Make · Craft · Create",
+  shopBoardName: "Sri Palani Textiles",
+  name: "Sri Palani Textiles",
+  shortName: "SPT",
+  tagline: "Quality Speak",
   /** Town shown on shop board / navbar */
-  location: "MADURAI",
+  location: "TAMIL NADU",
   description:
-    "Terracotta raw materials and art & craft supplies — make, craft, create with Hub of craftss by Shaaru.",
-  searchPlaceholder: "Search craft supplies, terracotta, collections…",
-  url: "https://hubsofcraftss.com",
+    "Manufacturers of handloom cloth & sarees — premium silk, cotton, wedding and festive collections from Sri Palani Textiles.",
+  searchPlaceholder: "Search sarees, collections…",
+  url: "https://sripalanitextiles.com",
   addressLines: ADDRESS_LINES,
   /** Single-line address for compact UI */
   address: ADDRESS_LINES.join(", "),
@@ -58,17 +54,17 @@ export const siteConfig = {
   /** Top offer ribbon — rotates on the storefront */
   announcements: [
     {
-      text: "Terracotta raw materials & art craft supplies — Make · Craft · Create",
+      text: "Quality Speak — manufacturers of handloom cloth & sarees",
       href: "/shop",
       cta: "Shop now",
     },
     {
-      text: "Follow @hub_of_craftss_by_shaaru for new arrivals",
-      href: "https://www.instagram.com/hub_of_craftss_by_shaaru/",
-      cta: "Instagram",
+      text: "Wedding & festive collections available",
+      href: "/collections",
+      cta: "Browse",
     },
     {
-      text: "Visit us in Madurai · Sarojini Nagar",
+      text: "Contact us for store visits and orders",
       href: "/contact",
       cta: "Contact",
     },
@@ -77,13 +73,13 @@ export const siteConfig = {
     {
       title: "Collections",
       href: "/collections",
-      description: "Browse craft collections.",
+      description: "Browse saree collections.",
       items: [],
     },
     {
       title: "Featured",
       href: "/featured",
-      description: "Handpicked craft supplies.",
+      description: "Handpicked sarees.",
       items: [],
     },
     {
@@ -132,17 +128,12 @@ export const siteConfig = {
       ],
     },
     {
-      title: "About Hub of craftss",
+      title: "About Sri Palani Textiles",
       items: [
         { title: "Our Story", href: "/about", items: [] },
         { title: "Our Collections", href: "/collections", items: [] },
         { title: "Visit our store", href: "/contact#store", items: [] },
         { title: "Contact", href: "/contact", items: [] },
-        {
-          title: "Instagram",
-          href: "https://www.instagram.com/hub_of_craftss_by_shaaru/",
-          items: [],
-        },
       ],
     },
   ] satisfies NavItemWithOptionalChildren[],

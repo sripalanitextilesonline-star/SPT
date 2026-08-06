@@ -4,10 +4,8 @@ import {
 } from "./velo-order-push-payload";
 
 describe("velo order push payload", () => {
-  it("uses the documented default Velo push URL", () => {
-    expect(DEFAULT_VELO_ORDER_PUSH_URL).toBe(
-      "https://rzwbpjjayarptlwjfpzm.supabase.co/functions/v1/notify-velo-order-push",
-    );
+  it("uses an empty default Velo push URL until configured", () => {
+    expect(DEFAULT_VELO_ORDER_PUSH_URL).toBe("");
   });
 
   it("builds payload with summed quantity, IST time, and trimmed shop URL", () => {

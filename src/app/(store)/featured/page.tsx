@@ -16,14 +16,14 @@ export const revalidate = 120;
 export const metadata: Metadata = {
   title: "Featured Products",
   description:
-    "Discover handpicked featured craft supplies at Hub of craftss — premium styles for weddings, festivals and special occasions.",
+    "Discover handpicked featured craft supplies at Sri Palani Textiles — premium styles for weddings, festivals and special occasions.",
   alternates: {
     canonical: "/featured",
   },
   openGraph: {
-    title: "Featured Products | Hub of craftss",
+    title: "Featured Products | Sri Palani Textiles",
     description:
-      "Discover handpicked featured craft supplies at Hub of craftss for weddings and festivals.",
+      "Discover handpicked featured craft supplies at Sri Palani Textiles for weddings and festivals.",
     url: "/featured",
   },
 };

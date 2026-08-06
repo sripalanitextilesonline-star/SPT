@@ -7,7 +7,7 @@
   //   build: npm run pages:build
   //   output: .open-next/pages
   // OpenNext Workers builds use wrangler.workers.jsonc instead.
-  "name": "hub-of-craftss",
+  "name": "sri-palani-textiles-pages",
   // Required for Workers Free 3 MiB gzip limit (same as wrangler.workers.jsonc).
   "minify": true,
   "compatibility_date": "2025-05-05",

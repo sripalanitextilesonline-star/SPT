@@ -7,9 +7,9 @@ import Link from "next/link";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Contact | Hub of craftss",
+  title: "Contact | Sri Palani Textiles",
   description:
-    "Contact Hub of craftss — phone, email, WhatsApp, and store address",
+    "Contact Sri Palani Textiles — phone, email, WhatsApp, and store address",
 };
 
 export const revalidate = 60;
@@ -23,7 +23,7 @@ export default async function ContactPage() {
   return (
     <InfoPage
       heading="Contact Us"
-      description="Reach Hub of craftss by Instagram, email, or visit our store in Madurai."
+      description="Reach Sri Palani Textiles by Instagram, email, or visit our store in Madurai."
     >
       <section id="store" className="space-y-3">
         <h2 className="text-base font-semibold text-foreground">

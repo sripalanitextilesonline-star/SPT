@@ -1,15 +1,18 @@
 import dotenv from "dotenv";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import postgres from "postgres";
+import {
+  getAuthRedirectUrls,
+  getProjectIdentity,
+  resolveFromRoot,
+} from "./lib/project-identity.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-dotenv.config({ path: join(root, ".env.local") });
+dotenv.config({ path: resolveFromRoot(".env.local") });
 
-const projectRef = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_REF;
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ??
-  `https://${projectRef}.supabase.co`;
+const identity = getProjectIdentity();
+const projectRef =
+  process.env.NEXT_PUBLIC_SUPABASE_PROJECT_REF?.trim() ||
+  identity.supabase.projectRef;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || identity.supabase.url;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceRole = process.env.DATABASE_SERVICE_ROLE;
 
@@ -19,6 +22,10 @@ const allowLiveEmailTest =
 
 if (!anonKey || !projectRef) {
   console.error("Missing Supabase env in .env.local");
+  process.exit(1);
+}
+if (projectRef !== identity.supabase.projectRef) {
+  console.error(`Wrong Supabase project ref: ${projectRef}`);
   process.exit(1);
 }
 
@@ -154,9 +161,9 @@ console.log("\nEmail signup test:");
 const signup = await testEmailSignup();
 if (signup.ok) {
   if (signup.skipped) {
-    console.log("  SKIPPED —", signup.reason);
+    console.log("  SKIPPED -", signup.reason);
   } else {
-    console.log("  OK — signup works");
+    console.log("  OK - signup works");
     console.log(
       "  email confirm required:",
       signup.emailConfirmationRequired ? "yes" : "no",
@@ -170,14 +177,22 @@ if (signup.ok) {
 const googleReady = Boolean(settings.external?.google);
 console.log("\nSummary:");
 console.log("  Email/password:", signup.ok ? "READY" : "NEEDS FIX");
-console.log("  Google OAuth:", googleReady ? "ENABLED in Supabase" : "NOT ENABLED — needs Google Cloud + Supabase provider");
+console.log(
+  "  Google OAuth:",
+  googleReady
+    ? "ENABLED in Supabase"
+    : "NOT ENABLED - needs Google Cloud + Supabase provider",
+);
 
 if (!googleReady) {
   console.log("\nGoogle redirect URI for Google Cloud Console:");
   console.log(`  ${supabaseUrl.replace(/\/$/, "")}/auth/v1/callback`);
-  console.log("\nApp callback URLs for Supabase → Authentication → URL Configuration:");
-  console.log("  http://localhost:3000/auth/callback");
-  console.log("  https://ssr-tex-shop.vercel.app/auth/callback");
+  console.log(
+    "\nApp callback URLs for Supabase -> Authentication -> URL Configuration:",
+  );
+  for (const url of getAuthRedirectUrls()) {
+    console.log(`  ${url}`);
+  }
 }
 
 process.exit(signup.ok && db.ok ? 0 : 1);

@@ -2,7 +2,7 @@
 
 ## 1. Put `DATABASE_URL` in `.env.local` (required once)
 
-Open: https://supabase.com/dashboard/project/qhtwwyqlsnckorndmhmt/settings/database
+Open: https://supabase.com/dashboard/project/YOUR_SUPABASE_PROJECT_REF/settings/database
 
 1. **Connection string** → **URI**
 2. Copy the full string
@@ -12,7 +12,7 @@ Open: https://supabase.com/dashboard/project/qhtwwyqlsnckorndmhmt/settings/datab
 **Or run helper (paste URI when asked):**
 
 ```powershell
-cd "e:\Sakthi textiles\HiyoRi-Ecommerce-Nextjs-Supabase"
+cd "e:\Sri Palani Textiles\HiyoRi-Ecommerce-Nextjs-Supabase"
 powershell -ExecutionPolicy Bypass -File .\scripts\set-database-url.ps1
 ```
 
@@ -21,7 +21,7 @@ Must **not** contain `YOUR_DB_PASSWORD`.
 ## 2. Official commands (from HiyoRi README)
 
 ```powershell
-cd "e:\Sakthi textiles\HiyoRi-Ecommerce-Nextjs-Supabase"
+cd "e:\Sri Palani Textiles\HiyoRi-Ecommerce-Nextjs-Supabase"
 npm run db:setup
 ```
 

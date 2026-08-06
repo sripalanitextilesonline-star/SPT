@@ -69,14 +69,14 @@ file_size_limit = "50MiB"
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "https://www.sairaghavendratex.com"
+site_url = "https://sripalanitextiles.com"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
   "http://localhost:3000/auth/callback",
   "http://127.0.0.1:3000/auth/callback",
-  "https://ssr-tex-shop.vercel.app/auth/callback",
-  "https://sairaghavendratex.com/auth/callback",
-  "https://www.sairaghavendratex.com/auth/callback",
+  "https://sripalanitextiles.com/auth/callback",
+  "https://www.sripalanitextiles.com/auth/callback",
+  "https://sri-palani-textiles.vercel.app/auth/callback",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600

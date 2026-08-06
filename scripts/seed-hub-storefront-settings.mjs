@@ -17,7 +17,7 @@ const contact = {
   ],
   gstin: "",
   email: "",
-  contacts: [{ name: "Shaaru", phone: "" }],
+  contacts: [{ name: "Sri Palani Textiles", phone: "" }],
 };
 
 const social = {

@@ -52,7 +52,7 @@ export async function GET() {
     {
       status: healthy ? "ok" : "degraded",
       timestamp: checkedAt,
-      service: "hiyori-app",
+      service: "sri-palani-textiles",
       checks: { database, redis },
     },
     { status: healthy ? 200 : 503 },
