@@ -29,7 +29,7 @@ export async function findMatchingCollections(
       imageAlt: medias.alt,
     })
     .from(collections)
-    .innerJoin(medias, eq(collections.featuredImageId, medias.id))
+    .leftJoin(medias, eq(collections.featuredImageId, medias.id))
     .where(
       or(
         ilike(collections.label, pattern),
@@ -44,9 +44,11 @@ export async function findMatchingCollections(
     id: row.id,
     label: row.label,
     slug: row.slug,
-    featuredImage: {
-      key: row.imageKey,
-      alt: row.imageAlt,
-    },
+    featuredImage: row.imageKey
+      ? {
+          key: row.imageKey,
+          alt: row.imageAlt,
+        }
+      : null,
   }));
 }

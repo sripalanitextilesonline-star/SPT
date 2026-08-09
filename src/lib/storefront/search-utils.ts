@@ -5,7 +5,7 @@ export type StorefrontCollectionMatch = {
   featuredImage: {
     key: string;
     alt: string | null;
-  };
+  } | null;
 };
 
 /** Placeholder ID so GraphQL `in` filters stay valid when no collections match. */

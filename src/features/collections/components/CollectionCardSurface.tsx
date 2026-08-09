@@ -36,21 +36,23 @@ export function CollectionCardSurface({
         className,
       )}
     >
-      <Image
-        src={imageSrc}
-        alt={imageAlt}
-        fill
-        priority={priority}
-        loading={priority ? undefined : "lazy"}
-        sizes={sizes}
-        className="object-cover object-center transition-transform duration-500 group-hover:scale-[1.05]"
-        style={
-          viewTransitionName
-            ? viewTransitionStyle(viewTransitionName)
-            : undefined
-        }
-        {...getStorefrontImageProps(imageSrc)}
-      />
+      {imageSrc ? (
+        <Image
+          src={imageSrc}
+          alt={imageAlt}
+          fill
+          priority={priority}
+          loading={priority ? undefined : "lazy"}
+          sizes={sizes}
+          className="object-cover object-center transition-transform duration-500 group-hover:scale-[1.05]"
+          style={
+            viewTransitionName
+              ? viewTransitionStyle(viewTransitionName)
+              : undefined
+          }
+          {...getStorefrontImageProps(imageSrc)}
+        />
+      ) : null}
 
       <div
         className="absolute inset-0 bg-gradient-to-t from-brand-purple/95 via-brand-teal/40 to-transparent"
