@@ -6,11 +6,7 @@
  * - Product mutations rely on a single route-level invalidate (not doubled).
  */
 
-export const VELO_READ_ACTIONS = [
-  "list",
-  "meta",
-  "resolveImages",
-] as const;
+export const VELO_READ_ACTIONS = ["list", "meta", "resolveImages"] as const;
 
 export const VELO_COLLECTION_MUTATION_ACTIONS = [
   "upsertCollection",
