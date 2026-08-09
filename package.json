@@ -11,6 +11,7 @@
     "serve:out": "serve out",
     "serve": "npm run build && npm run start",
     "identity:validate": "node scripts/validate-project-identity.mjs",
+    "validate:velo-media": "node scripts/validate-velo-media-e2e.cjs",
     "identity:validate:strict": "node scripts/validate-project-identity.mjs --strict-cloudflare-login",
     "preview": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc && opennextjs-cloudflare build --config wrangler.workers.new-account.jsonc && opennextjs-cloudflare preview --config wrangler.workers.new-account.jsonc",
     "deploy": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc && opennextjs-cloudflare build --config wrangler.workers.new-account.jsonc && opennextjs-cloudflare deploy --config wrangler.workers.new-account.jsonc",
