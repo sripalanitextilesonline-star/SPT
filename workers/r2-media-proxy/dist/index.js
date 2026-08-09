@@ -16,7 +16,7 @@ function corsHeaders(request) {
   const allowOrigin = CORS_ORIGINS.has(origin) ? origin : "*";
   return {
     "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, HEAD, PUT, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400"
   };
@@ -130,6 +130,15 @@ async function authorizeRequest(request, env, objectKey) {
   }
   return null;
 }
+function isSafeFinalKey(key) {
+  if (!key.startsWith("uploads/"))
+    return false;
+  if (key.startsWith(STAGING_PREFIX))
+    return false;
+  if (key.includes("..") || key.includes("\\"))
+    return false;
+  return /^uploads\/[A-Za-z0-9/_-]+\.[a-z0-9]+$/i.test(key);
+}
 var src_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -140,7 +149,44 @@ var src_default = {
       });
     }
     if (request.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(request, { ok: true });
+      return jsonResponse(request, { ok: true, promote: true });
+    }
+    if (request.method === "POST" && url.pathname === "/promote") {
+      const auth2 = await authorizeRequest(request, env, null);
+      if (auth2 !== "server")
+        return unauthorized(request);
+      const body = await request.json().catch(() => null);
+      const fromKey = typeof body?.fromKey === "string" ? sanitizeKey(body.fromKey) : null;
+      const toKey = typeof body?.toKey === "string" ? sanitizeKey(body.toKey) : null;
+      if (!fromKey || !fromKey.startsWith(STAGING_PREFIX)) {
+        return badRequest(request, "fromKey must be a staging key.");
+      }
+      if (!toKey || !isSafeFinalKey(toKey)) {
+        return badRequest(request, "toKey must be a final uploads/ key.");
+      }
+      const src = await env.MEDIA_BUCKET.get(fromKey);
+      if (!src) {
+        return jsonResponse(request, { error: "Staging object not found." }, 404);
+      }
+      const contentType = typeof body?.contentType === "string" && body.contentType.trim() || src.httpMetadata?.contentType || "application/octet-stream";
+      const cacheControl = typeof body?.cacheControl === "string" && body.cacheControl.trim() || "public, max-age=31536000, immutable";
+      if (!src.body) {
+        return badRequest(request, "Staging object has no body.");
+      }
+      await env.MEDIA_BUCKET.put(toKey, src.body, {
+        httpMetadata: { contentType, cacheControl }
+      });
+      const deleteSource = body?.deleteSource !== false;
+      if (deleteSource) {
+        await env.MEDIA_BUCKET.delete(fromKey);
+      }
+      return jsonResponse(request, {
+        ok: true,
+        fromKey,
+        toKey,
+        size: src.size,
+        contentType
+      });
     }
     if (url.pathname !== "/object") {
       return badRequest(request, "Unknown path.");
@@ -175,6 +221,24 @@ var src_default = {
         }
       });
       return jsonResponse(request, { ok: true, key });
+    }
+    if (request.method === "HEAD") {
+      const key = objectKey;
+      if (!key)
+        return badRequest(request, "Missing or invalid key.");
+      const obj = await env.MEDIA_BUCKET.head(key);
+      if (!obj) {
+        return new Response(null, {
+          status: 404,
+          headers: corsHeaders(request)
+        });
+      }
+      const headers = new Headers(corsHeaders(request));
+      const ct = obj.httpMetadata?.contentType;
+      if (ct)
+        headers.set("Content-Type", ct);
+      headers.set("Content-Length", String(obj.size));
+      return new Response(null, { status: 200, headers });
     }
     if (request.method === "GET") {
       const key = objectKey;

@@ -4,6 +4,9 @@
  * Auth:
  * - Authorization: Bearer <MEDIA_PROXY_SECRET> (server / Vercel)
  * - Authorization: Bearer upload.v1.<exp>.<keyB64>.<sig> (short-lived client PUT)
+ *
+ * Industry path: client PUTs staging → server POST /promote copies inside R2
+ * (no image bytes through Vercel).
  */
 
 type R2ObjectBody = {
@@ -15,12 +18,16 @@ type R2ObjectBody = {
 type R2BucketBinding = {
   put: (
     key: string,
-    value: ArrayBuffer | ArrayBufferView | string | null,
+    value: ArrayBuffer | ArrayBufferView | string | null | ReadableStream,
     options?: {
       httpMetadata?: { contentType?: string; cacheControl?: string };
     },
   ) => Promise<unknown>;
   get: (key: string) => Promise<R2ObjectBody | null>;
+  head: (key: string) => Promise<{
+    size: number;
+    httpMetadata?: { contentType?: string };
+  } | null>;
   delete: (keys: string | string[]) => Promise<void>;
 };
 
@@ -48,7 +55,7 @@ function corsHeaders(request: Request): HeadersInit {
   const allowOrigin = CORS_ORIGINS.has(origin) ? origin : "*";
   return {
     "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, HEAD, PUT, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
@@ -152,7 +159,6 @@ async function verifyUploadToken(
     return false;
   }
   if (key !== expectedKey) return false;
-  // Client tokens may only write staging keys.
   if (!key.startsWith(STAGING_PREFIX)) return false;
   const payload = `${TOKEN_PREFIX}:${exp}:${key}`;
   const expectedSig = await hmacSign(secret, payload);
@@ -176,6 +182,13 @@ async function authorizeRequest(
   return null;
 }
 
+function isSafeFinalKey(key: string): boolean {
+  if (!key.startsWith("uploads/")) return false;
+  if (key.startsWith(STAGING_PREFIX)) return false;
+  if (key.includes("..") || key.includes("\\")) return false;
+  return /^uploads\/[A-Za-z0-9/_-]+\.[a-z0-9]+$/i.test(key);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -188,7 +201,66 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(request, { ok: true });
+      return jsonResponse(request, { ok: true, promote: true });
+    }
+
+    // Server-only: copy staging → final inside R2 (no bytes to Vercel).
+    if (request.method === "POST" && url.pathname === "/promote") {
+      const auth = await authorizeRequest(request, env, null);
+      if (auth !== "server") return unauthorized(request);
+
+      const body = (await request.json().catch(() => null)) as {
+        fromKey?: unknown;
+        toKey?: unknown;
+        contentType?: unknown;
+        cacheControl?: unknown;
+        deleteSource?: unknown;
+      } | null;
+
+      const fromKey =
+        typeof body?.fromKey === "string" ? sanitizeKey(body.fromKey) : null;
+      const toKey =
+        typeof body?.toKey === "string" ? sanitizeKey(body.toKey) : null;
+      if (!fromKey || !fromKey.startsWith(STAGING_PREFIX)) {
+        return badRequest(request, "fromKey must be a staging key.");
+      }
+      if (!toKey || !isSafeFinalKey(toKey)) {
+        return badRequest(request, "toKey must be a final uploads/ key.");
+      }
+
+      const src = await env.MEDIA_BUCKET.get(fromKey);
+      if (!src) {
+        return jsonResponse(request, { error: "Staging object not found." }, 404);
+      }
+
+      const contentType =
+        (typeof body?.contentType === "string" && body.contentType.trim()) ||
+        src.httpMetadata?.contentType ||
+        "application/octet-stream";
+      const cacheControl =
+        (typeof body?.cacheControl === "string" && body.cacheControl.trim()) ||
+        "public, max-age=31536000, immutable";
+
+      if (!src.body) {
+        return badRequest(request, "Staging object has no body.");
+      }
+
+      await env.MEDIA_BUCKET.put(toKey, src.body, {
+        httpMetadata: { contentType, cacheControl },
+      });
+
+      const deleteSource = body?.deleteSource !== false;
+      if (deleteSource) {
+        await env.MEDIA_BUCKET.delete(fromKey);
+      }
+
+      return jsonResponse(request, {
+        ok: true,
+        fromKey,
+        toKey,
+        size: src.size,
+        contentType,
+      });
     }
 
     if (url.pathname !== "/object") {
@@ -199,7 +271,6 @@ export default {
     const auth = await authorizeRequest(request, env, objectKey);
     if (!auth) return unauthorized(request);
 
-    // Upload tokens: PUT staging only.
     if (auth === "upload" && request.method !== "PUT") {
       return unauthorized(request);
     }
@@ -235,6 +306,25 @@ export default {
       });
 
       return jsonResponse(request, { ok: true, key });
+    }
+
+    if (request.method === "HEAD") {
+      const key = objectKey;
+      if (!key) return badRequest(request, "Missing or invalid key.");
+
+      const obj = await env.MEDIA_BUCKET.head(key);
+      if (!obj) {
+        return new Response(null, {
+          status: 404,
+          headers: corsHeaders(request),
+        });
+      }
+
+      const headers = new Headers(corsHeaders(request));
+      const ct = obj.httpMetadata?.contentType;
+      if (ct) headers.set("Content-Type", ct);
+      headers.set("Content-Length", String(obj.size));
+      return new Response(null, { status: 200, headers });
     }
 
     if (request.method === "GET") {

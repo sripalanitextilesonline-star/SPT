@@ -102,10 +102,15 @@ async function deleteExclusiveProductMedias(
 
   for (const mediaId of mediaIds) {
     const usage = usageByMedia.get(mediaId);
-    const productIds = usage?.productIds ?? [];
-    const exclusive = productIds.length === 1 && productIds[0] === productId;
+    const remainingProductIds = usage?.productIds ?? [];
+    // After the product row is gone, zero remaining product refs means this
+    // media was exclusive to it (or already unused).
+    const unusedByProducts =
+      remainingProductIds.length === 0 ||
+      (remainingProductIds.length === 1 &&
+        remainingProductIds[0] === productId);
 
-    if (!exclusive) continue;
+    if (!unusedByProducts) continue;
     if ((usage?.collectionCount ?? 0) > 0) continue;
     if ((usage?.testimonialCount ?? 0) > 0) continue;
     if ((usage?.bannerSlideCount ?? 0) > 0) continue;
@@ -125,11 +130,23 @@ async function deleteExclusiveProductMedias(
 }
 
 export async function deleteProductsCompletely(productIds: string[]) {
-  for (const productId of productIds) {
-    const mediaIds = await collectProductMediaIds(productId);
-    await db.delete(products).where(eq(products.id, productId));
-    await deleteExclusiveProductMedias(mediaIds, productId);
-  }
+  const uniqueIds = [...new Set(productIds)];
+  if (uniqueIds.length === 0) return;
+
+  const mediaByProduct = new Map<string, string[]>();
+  await Promise.all(
+    uniqueIds.map(async (productId) => {
+      mediaByProduct.set(productId, await collectProductMediaIds(productId));
+    }),
+  );
+
+  await db.delete(products).where(inArray(products.id, uniqueIds));
+
+  await Promise.all(
+    [...mediaByProduct.entries()].map(([productId, mediaIds]) =>
+      deleteExclusiveProductMedias(mediaIds, productId),
+    ),
+  );
 }
 
 export async function archiveProductsWithPaidHistory(
@@ -219,7 +236,7 @@ export async function deleteCategoryWithProducts(collectionId: string) {
 }
 
 /** Products processed per category-delete request (keeps each call under serverless limits). */
-export const CATEGORY_DELETE_BATCH_SIZE = 3;
+export const CATEGORY_DELETE_BATCH_SIZE = 10;
 
 /**
  * Delete/archive a batch of products in a category, then remove the category

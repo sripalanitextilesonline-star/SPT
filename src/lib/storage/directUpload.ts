@@ -12,6 +12,8 @@ import {
   deleteObjects,
   getObjectBuffer,
   hasServerMediaWritePath,
+  headObjectMeta,
+  promoteObject,
   putObject,
   type MediaWriteAuth,
 } from "@/lib/s3";
@@ -45,6 +47,26 @@ export function isValidStagingPath(path: string): boolean {
   if (!path.startsWith(STAGING_PREFIX)) return false;
   if (path.includes("..") || path.includes("\\")) return false;
   return /^uploads\/staging\/[A-Za-z0-9_-]+\.[a-z0-9]+$/i.test(path);
+}
+
+function buildFinalKey(purpose: DirectUploadPurpose, fileName: string): string {
+  const extension = sanitizeExtension(fileName);
+  const namePrefix =
+    purpose === "product-draft"
+      ? "product-draft"
+      : purpose === "velo-product"
+        ? "velo-product"
+        : "upload";
+  return `uploads/${namePrefix}-${nanoid()}.${extension}`;
+}
+
+function contentTypeFromFileName(fileName: string): string {
+  const ext = sanitizeExtension(fileName).toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return "application/octet-stream";
 }
 
 async function deleteStagingFile(
@@ -187,6 +209,11 @@ export async function stageDirectUpload(params: {
   return { storagePath: params.storagePath };
 }
 
+/**
+ * Finalize staging upload.
+ * Preferred path: HEAD + in-R2 promote (no image bytes on Vercel).
+ * Fallback: download + validate + re-upload (legacy / missing promote).
+ */
 export async function finalizeDirectUpload(params: {
   storagePath: string;
   originalFileName: string;
@@ -199,6 +226,63 @@ export async function finalizeDirectUpload(params: {
   }
 
   const stagingKey = params.storagePath;
+  const safeName = sanitizeUploadFileName(params.originalFileName);
+  const alt = toMediaAltText(params.originalFileName);
+  const finalKey = buildFinalKey(params.purpose, safeName);
+  const guessedType = contentTypeFromFileName(safeName);
+
+  // Industry path: metadata check + Worker/R2 promote (tiny Vercel work).
+  try {
+    const meta = await headObjectMeta({ key: stagingKey, auth });
+    if (!meta.size || meta.size <= 0) {
+      await deleteStagingFile(stagingKey, auth);
+      throw new Error("Empty file.");
+    }
+    if (meta.size > MAX_PROCESSED_IMAGE_BYTES) {
+      await deleteStagingFile(stagingKey, auth);
+      throw new Error(
+        "Image is too large after upload. Compress under 1 MB and retry.",
+      );
+    }
+    const contentType = meta.contentType?.startsWith("image/")
+      ? meta.contentType
+      : guessedType;
+    if (!contentType.startsWith("image/")) {
+      await deleteStagingFile(stagingKey, auth);
+      throw new Error("Only image files are allowed.");
+    }
+
+    await promoteObject({
+      fromKey: stagingKey,
+      toKey: finalKey,
+      contentType,
+      auth,
+    });
+
+    const [insertedMedia] = await db
+      .insert(medias)
+      .values({ alt, key: finalKey })
+      .returning({ id: medias.id });
+
+    return {
+      mediaId: insertedMedia.id,
+      key: finalKey,
+      fileName: alt,
+      promoted: true as const,
+    };
+  } catch (promoteError) {
+    // Fall back only when promote/HEAD unavailable — keep uploads working.
+    const message =
+      promoteError instanceof Error ? promoteError.message : String(promoteError);
+    const hardFail =
+      /empty file|too large|only image|not found|invalid staging/i.test(
+        message,
+      );
+    if (hardFail) throw promoteError;
+
+    logServerError("directUpload/promoteFallback", promoteError);
+  }
+
   let buffer: Buffer;
   try {
     buffer = await getObjectBuffer({
@@ -224,9 +308,6 @@ export async function finalizeDirectUpload(params: {
     );
   }
 
-  const safeName = sanitizeUploadFileName(params.originalFileName);
-  const alt = toMediaAltText(params.originalFileName);
-
   let processed;
   try {
     processed = await processUploadedImageBuffer(buffer, safeName);
@@ -238,20 +319,17 @@ export async function finalizeDirectUpload(params: {
   }
   buffer = Buffer.alloc(0);
 
-  const namePrefix =
-    params.purpose === "product-draft"
-      ? "product-draft"
-      : params.purpose === "velo-product"
-        ? "velo-product"
-        : "upload";
-
-  let finalKey: string;
+  let uploadedKey: string;
   try {
-    finalKey = await uploadMediaToR2(
+    uploadedKey = await uploadMediaToR2(
       processed.buffer,
       processed.contentType,
       processed.extension,
-      namePrefix,
+      params.purpose === "product-draft"
+        ? "product-draft"
+        : params.purpose === "velo-product"
+          ? "velo-product"
+          : "upload",
       { auth },
     );
   } catch (error) {
@@ -261,14 +339,15 @@ export async function finalizeDirectUpload(params: {
 
   const [insertedMedia] = await db
     .insert(medias)
-    .values({ alt, key: finalKey })
+    .values({ alt, key: uploadedKey })
     .returning({ id: medias.id });
 
   await deleteStagingFile(stagingKey, auth);
 
   return {
     mediaId: insertedMedia.id,
-    key: finalKey,
+    key: uploadedKey,
     fileName: alt,
+    promoted: false as const,
   };
 }

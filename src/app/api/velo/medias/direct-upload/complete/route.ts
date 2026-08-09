@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
         key: result.key,
         fileName: result.fileName,
         featuredImageMediaId: result.mediaId,
+        promoted: result.promoted === true,
       },
       { status: 201, headers: veloCorsHeaders(request) },
     );

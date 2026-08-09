@@ -1,13 +1,10 @@
 /**
- * End-to-end validation for SPT Velo media + products path.
- * Uses DATABASE_URL + R2_MEDIA_PROXY_* from .env.local.
- * Creates a temporary Velo key if none is active (revokes it at end).
+ * Full live validation: parallel media uploads (promote path), category+product CRUD.
  */
 const fs = require("fs");
 const crypto = require("crypto");
 const postgres = require("postgres");
 
-/** Minimal valid 1x1 WebP (no sharp dependency). */
 const TINY_WEBP = Buffer.from(
   "UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA=",
   "base64",
@@ -39,20 +36,104 @@ async function main() {
   const site = "https://sripalanitextiles.com";
   const mediaBase = (env.R2_MEDIA_PROXY_URL || "").replace(/\/$/, "");
   const results = [];
+  const stamp = Date.now();
 
   const check = (name, ok, detail) => {
     results.push({ name, ok, detail });
-    console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
+    console.log(
+      `${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`,
+    );
   };
 
-  // 1) Health
+  const callProducts = async (apiKey, action, data) => {
+    const r = await fetch(`${site}/api/velo/products`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-velo-key": apiKey,
+      },
+      body: JSON.stringify({
+        action,
+        requestId: `validate-${action}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        data,
+      }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return { r, j };
+  };
+
+  const uploadOne = async (apiKey, label) => {
+    const t0 = Date.now();
+    const initRes = await fetch(`${site}/api/velo/medias/direct-upload/init`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-velo-key": apiKey,
+      },
+      body: JSON.stringify({
+        fileName: `${label}-${stamp}.webp`,
+        contentType: "image/webp",
+        fileSize: TINY_WEBP.length,
+      }),
+    });
+    const init = await initRes.json().catch(() => ({}));
+    if (
+      !initRes.ok ||
+      !init.ok ||
+      init.uploadMode !== "proxy" ||
+      !init.uploadUrl ||
+      !init.uploadToken
+    ) {
+      throw new Error(`init failed status=${initRes.status}`);
+    }
+
+    const put = await fetch(init.uploadUrl, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${init.uploadToken}`,
+        "Content-Type": "image/webp",
+      },
+      body: TINY_WEBP,
+    });
+    if (!put.ok) throw new Error(`proxy put failed status=${put.status}`);
+
+    const doneRes = await fetch(
+      `${site}/api/velo/medias/direct-upload/complete`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-velo-key": apiKey,
+        },
+        body: JSON.stringify({
+          storagePath: init.storagePath,
+          fileName: `${label}-${stamp}.webp`,
+        }),
+      },
+    );
+    const done = await doneRes.json().catch(() => ({}));
+    const mediaId = done.mediaId || done.featuredImageMediaId;
+    if (!doneRes.ok || !done.ok || !mediaId) {
+      throw new Error(
+        `complete failed status=${doneRes.status} msg=${done.message || ""}`,
+      );
+    }
+    return {
+      mediaId,
+      promoted: done.promoted === true,
+      ms: Date.now() - t0,
+    };
+  };
+
   {
     const r = await fetch(`${mediaBase}/health`);
     const j = await r.json().catch(() => ({}));
-    check("media.health", r.ok && j.ok === true, `status=${r.status}`);
+    check(
+      "media.health",
+      r.ok && j.ok === true,
+      `status=${r.status} promote=${j.promote === true}`,
+    );
   }
-
-  // 2) Site health
   {
     const r = await fetch(`${site}/api/health`);
     const j = await r.json().catch(() => ({}));
@@ -67,148 +148,168 @@ async function main() {
 
   let tempKeyId = null;
   let apiKey = null;
+  const mediaIds = [];
+  let collectionId = null;
+  let productId = null;
+  const externalProductId = `VALIDATE-${stamp}`;
 
   try {
-    const existing = await sql`
-      SELECT id, key_prefix
-      FROM external_api_keys
-      WHERE provider = 'velo' AND is_active = true AND revoked_at IS NULL
-      ORDER BY created_at DESC
-      LIMIT 1
-    `;
-
-    // Always create a disposable key for this validation run so we don't need plaintext of existing keys.
     apiKey = makeApiKey();
     const keyPrefix = apiKey.slice(0, 18);
     const keyHash = hashApiKey(apiKey);
     const [inserted] = await sql`
       INSERT INTO external_api_keys (id, provider, client_name, key_prefix, key_hash, is_active)
-      VALUES (${crypto.randomUUID()}, 'velo', 'validation-probe', ${keyPrefix}, ${keyHash}, true)
+      VALUES (${crypto.randomUUID()}, 'velo', 'validation-industry-probe', ${keyPrefix}, ${keyHash}, true)
       RETURNING id
     `;
     tempKeyId = inserted.id;
     check("velo.key.create", Boolean(tempKeyId), `id=${tempKeyId}`);
 
-    // 3) products meta (read, no full cache bust)
-    {
-      const r = await fetch(`${site}/api/velo/products`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-velo-key": apiKey,
-        },
-        body: JSON.stringify({
-          action: "meta",
-          requestId: `validate-meta-${Date.now()}`,
-          data: { type: "collections" },
-        }),
-      });
-      const j = await r.json().catch(() => ({}));
+    // Parallel 4-photo industry upload
+    const parallelStarted = Date.now();
+    let parallel;
+    try {
+      parallel = await Promise.all([
+        uploadOne(apiKey, "p1"),
+        uploadOne(apiKey, "p2"),
+        uploadOne(apiKey, "p3"),
+        uploadOne(apiKey, "p4"),
+      ]);
+    } catch (e) {
       check(
-        "velo.products.meta",
-        r.ok && j.ok === true && Array.isArray(j.collections),
-        `status=${r.status} collections=${j.collections?.length ?? 0}`,
+        "velo.medias.parallel4",
+        false,
+        e instanceof Error ? e.message : String(e),
+      );
+      parallel = [];
+    }
+    const parallelMs = Date.now() - parallelStarted;
+    if (parallel.length === 4) {
+      mediaIds.push(...parallel.map((p) => p.mediaId));
+      const allPromoted = parallel.every((p) => p.promoted);
+      check(
+        "velo.medias.parallel4",
+        true,
+        `ms=${parallelMs} promoted=${allPromoted} ids=${mediaIds.length}`,
+      );
+      check(
+        "velo.medias.promoted",
+        allPromoted,
+        allPromoted
+          ? "complete used in-R2 promote"
+          : "fell back to download path — redeploy spt-media + Vercel",
+      );
+      check(
+        "velo.medias.parallelBudget",
+        parallelMs < 60000,
+        `ms=${parallelMs} (expect <60s for tiny files)`,
       );
     }
 
-    // 4) medias init → proxy PUT → complete
-    const tinyWebp = TINY_WEBP;
-
-    let storagePath = null;
-    let mediaId = null;
-
-    {
-      const r = await fetch(`${site}/api/velo/medias/direct-upload/init`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-velo-key": apiKey,
-        },
-        body: JSON.stringify({
-          fileName: "validate-probe.webp",
-          contentType: "image/webp",
-          fileSize: tinyWebp.length,
-        }),
+    // Category with featured image (no base64)
+    if (mediaIds[0]) {
+      const { r, j } = await callProducts(apiKey, "upsertCollection", {
+        name: `Validate Cat ${stamp}`,
+        description: "Automated validation category with image",
+        featuredImageMediaId: mediaIds[0],
       });
-      const j = await r.json().catch(() => ({}));
-      const ok =
-        r.status === 201 &&
-        j.ok === true &&
-        typeof j.storagePath === "string" &&
-        (j.uploadMode === "proxy"
-          ? Boolean(j.uploadUrl && j.uploadToken)
-          : j.uploadMode === "worker" || j.uploadMode === "presigned");
-      storagePath = j.storagePath;
+      collectionId = j.collection?.id;
       check(
-        "velo.medias.init",
-        ok,
-        `status=${r.status} mode=${j.uploadMode} msg=${j.message || ""}`,
+        "velo.category.createWithImage",
+        r.ok &&
+          j.ok === true &&
+          Boolean(collectionId) &&
+          j.collection?.featuredImageId === mediaIds[0],
+        `status=${r.status} id=${collectionId || ""} featured=${j.collection?.featuredImageId || ""}`,
       );
+    } else {
+      check("velo.category.createWithImage", false, "no media");
+    }
 
-      if (ok && j.uploadMode === "proxy") {
-        const put = await fetch(j.uploadUrl, {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${j.uploadToken}`,
-            "Content-Type": "image/webp",
-          },
-          body: tinyWebp,
+    // Product with second media
+    if (collectionId && mediaIds[1]) {
+      const { r, j } = await callProducts(apiKey, "upsert", {
+        externalProductId,
+        name: `Validate Product ${stamp}`,
+        description: "Automated validation product",
+        collectionId,
+        tags: ["validate"],
+        badge: null,
+        rating: "4",
+        price: "999",
+        stock: 1,
+        isDraft: true,
+        featuredImageMediaId: mediaIds[1],
+      });
+      productId = j.product?.productId;
+      check(
+        "velo.product.upsert",
+        r.ok && j.ok === true && Boolean(productId),
+        `status=${r.status} productId=${productId || ""}`,
+      );
+    } else {
+      check("velo.product.upsert", false, "missing collection/media");
+    }
+
+    if (productId) {
+      const { r, j } = await callProducts(apiKey, "list", {
+        search: `Validate Product ${stamp}`,
+        draft: "all",
+        page: 1,
+        pageSize: 20,
+      });
+      const rows = j.products || [];
+      const found = rows.some((p) => p.productId === productId);
+      check("velo.product.list", r.ok && j.ok === true && found, `rows=${rows.length}`);
+    }
+
+    if (productId) {
+      const { r, j } = await callProducts(apiKey, "delete", {
+        productId,
+        externalProductId,
+      });
+      check(
+        "velo.product.delete",
+        r.ok && j.ok === true,
+        `status=${r.status} msg=${j.message || ""}`,
+      );
+      productId = null;
+    }
+
+    if (collectionId) {
+      let done = false;
+      let lastMsg = "";
+      for (let i = 0; i < 5; i += 1) {
+        const { r, j } = await callProducts(apiKey, "deleteCollection", {
+          id: collectionId,
+          batchSize: 10,
         });
-        const putText = await put.text();
-        check(
-          "velo.medias.proxyPut",
-          put.ok,
-          `status=${put.status} body=${putText.slice(0, 120)}`,
-        );
-      } else if (ok && j.uploadMode === "worker") {
-        const form = new FormData();
-        form.append("storagePath", j.storagePath);
-        form.append(
-          "file",
-          new Blob([tinyWebp], { type: "image/webp" }),
-          "validate-probe.webp",
-        );
-        const stage = await fetch(
-          `${site}/api/velo/medias/direct-upload/stage`,
-          {
-            method: "POST",
-            headers: { "x-velo-key": apiKey },
-            body: form,
-          },
-        );
-        const sj = await stage.json().catch(() => ({}));
-        check(
-          "velo.medias.stageFallback",
-          stage.ok && sj.ok === true,
-          `status=${stage.status}`,
-        );
+        lastMsg = j.message || "";
+        if (
+          r.ok &&
+          j.ok === true &&
+          (j.done === true || j.collectionDeleted === true)
+        ) {
+          done = true;
+          break;
+        }
+        if (!r.ok || j.ok === false) {
+          check(
+            "velo.category.delete",
+            false,
+            `status=${r.status} msg=${lastMsg}`,
+          );
+          break;
+        }
+      }
+      if (done) {
+        check("velo.category.delete", true, lastMsg || "deleted");
+        collectionId = null;
+      } else if (!results.some((x) => x.name === "velo.category.delete")) {
+        check("velo.category.delete", false, `not done: ${lastMsg}`);
       }
     }
 
-    if (storagePath) {
-      const r = await fetch(`${site}/api/velo/medias/direct-upload/complete`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-velo-key": apiKey,
-        },
-        body: JSON.stringify({
-          storagePath,
-          fileName: "validate-probe.webp",
-        }),
-      });
-      const j = await r.json().catch(() => ({}));
-      mediaId = j.mediaId || j.featuredImageMediaId;
-      check(
-        "velo.medias.complete",
-        r.status === 201 && j.ok === true && Boolean(mediaId),
-        `status=${r.status} mediaId=${mediaId || ""}`,
-      );
-    } else {
-      check("velo.medias.complete", false, "skipped — no storagePath");
-    }
-
-    // 5) Unauthorized rejection
     {
       const r = await fetch(`${site}/api/velo/medias/direct-upload/init`, {
         method: "POST",
@@ -219,15 +320,33 @@ async function main() {
           fileSize: 100,
         }),
       });
-      check("velo.medias.unauthorized", r.status === 401, `status=${r.status}`);
-    }
-
-    // Cleanup media row if created (leave R2 object; lifecycle can purge staging leftovers)
-    if (mediaId) {
-      await sql`DELETE FROM medias WHERE id = ${mediaId}`;
-      check("cleanup.mediaRow", true, `deleted ${mediaId}`);
+      check("velo.unauthorized", r.status === 401, `status=${r.status}`);
     }
   } finally {
+    try {
+      if (productId) {
+        await sql`DELETE FROM products WHERE id = ${productId}`;
+      }
+      if (collectionId) {
+        await sql`UPDATE products SET collection_id = NULL WHERE collection_id = ${collectionId}`;
+        await sql`DELETE FROM collections WHERE id = ${collectionId}`;
+      }
+      for (const mediaId of mediaIds) {
+        const stillUsed = await sql`
+          SELECT id FROM collections WHERE featured_image_id = ${mediaId} LIMIT 1
+        `;
+        const stillProd = await sql`
+          SELECT id FROM products WHERE featured_image_id = ${mediaId} LIMIT 1
+        `;
+        if (stillUsed.length === 0 && stillProd.length === 0) {
+          await sql`DELETE FROM medias WHERE id = ${mediaId}`;
+        }
+      }
+      check("cleanup.mediaDb", true, `checked=${mediaIds.length}`);
+    } catch (e) {
+      check("cleanup.db", false, e instanceof Error ? e.message : String(e));
+    }
+
     if (tempKeyId) {
       await sql`
         UPDATE external_api_keys
@@ -241,8 +360,11 @@ async function main() {
 
   const failed = results.filter((r) => !r.ok);
   console.log("\n--- summary ---");
-  console.log(`passed=${results.filter((r) => r.ok).length} failed=${failed.length}`);
+  console.log(
+    `passed=${results.filter((r) => r.ok).length} failed=${failed.length}`,
+  );
   if (failed.length) {
+    for (const f of failed) console.log(`  - ${f.name}: ${f.detail || ""}`);
     process.exitCode = 1;
   }
 }
