@@ -22,7 +22,18 @@ import {
 } from "@/lib/supabase/schema";
 import { resolveProductImageUrls } from "./velo-product-images";
 import { keytoUrl, slugify } from "@/lib/utils";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { processUploadedImageBuffer } from "@/lib/image/processUpload";
 import {
@@ -1101,7 +1112,10 @@ async function handleUpsertCollection(
     }
     // New category with no image: leave null; first product upload backfills it.
   } catch (error) {
-    const message = publicErrorMessage(error, "Could not process category image.");
+    const message = publicErrorMessage(
+      error,
+      "Could not process category image.",
+    );
     return {
       ok: false,
       requestId,
