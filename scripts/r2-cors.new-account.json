@@ -3,8 +3,9 @@
     {
       "allowed": {
         "origins": [
-          "https://hubsofcraftss.com",
-          "https://www.hubsofcraftss.com",
+          "https://sripalanitextiles.com",
+          "https://www.sripalanitextiles.com",
+          "https://sri-palani-textiles.vercel.app",
           "http://localhost:3000"
         ],
         "methods": ["GET", "PUT", "HEAD"],

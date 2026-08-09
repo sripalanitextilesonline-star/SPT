@@ -15,9 +15,13 @@ export function cn(...inputs: ClassValue[]) {
 
 export const getURL = () => {
   const envUrl = env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (envUrl?.includes("localhost")) {
-    const normalized = envUrl.includes("http") ? envUrl : `http://${envUrl}`;
-    return normalized.endsWith("/") ? normalized : `${normalized}/`;
+  if (envUrl) {
+    const withProtocol = envUrl.includes("://")
+      ? envUrl
+      : envUrl.includes("localhost")
+        ? `http://${envUrl}`
+        : `https://${envUrl}`;
+    return withProtocol.endsWith("/") ? withProtocol : `${withProtocol}/`;
   }
 
   return getCanonicalSiteBaseUrl();

@@ -2,20 +2,18 @@ import {
   getAllowedAuthCallbackUrls,
   getCanonicalSiteOrigin as getIdentityCanonicalSiteOrigin,
   normalizeOrigin,
-  projectIdentity,
 } from "@/lib/project/identity";
 
-/** Primary site origin from env when explicitly local; otherwise use project identity. */
+/** Primary site origin from env when set; otherwise Vercel URL / project identity. */
 export function getCanonicalSiteOrigin(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (fromEnv) {
-    const normalized = normalizeOrigin(fromEnv);
-    if (projectIdentity.site.localOrigins.includes(normalized)) {
-      return normalized;
-    }
+    return normalizeOrigin(fromEnv);
   }
 
-  const vercelUrl = process.env.NEXT_PUBLIC_VERCEL_URL?.trim();
+  const vercelUrl =
+    process.env.NEXT_PUBLIC_VERCEL_URL?.trim() ||
+    process.env.VERCEL_URL?.trim();
   if (vercelUrl) {
     return normalizeOrigin(vercelUrl);
   }

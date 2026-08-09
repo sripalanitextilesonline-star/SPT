@@ -3,10 +3,11 @@ import { getProjectIdentity } from "./lib/project-identity.mjs";
 
 const identity = getProjectIdentity();
 const secret = readFileSync("scripts/.media-proxy-secret.tmp", "utf8").trim();
+const defaultProxyUrl = "https://media.sripalanitextiles.com";
 const base = (
   process.env.R2_MEDIA_PROXY_URL ||
   process.env.MEDIA_PROXY_BASE_URL ||
-  ""
+  defaultProxyUrl
 ).trim();
 
 if (!base) {
@@ -15,6 +16,13 @@ if (!base) {
   );
   process.exit(1);
 }
+
+console.log(
+  JSON.stringify({
+    worker: identity.cloudflare.workers.mediaProxy.name,
+    base,
+  }),
+);
 const key = `healthcheck/proxy-probe-${Date.now()}.txt`;
 
 const put = await fetch(`${base}/object?key=${encodeURIComponent(key)}`, {

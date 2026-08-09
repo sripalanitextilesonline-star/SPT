@@ -5,7 +5,9 @@ type ProjectIdentity = typeof identity;
 export const projectIdentity: ProjectIdentity = identity;
 
 export function normalizeOrigin(value: string): string {
-  return value.trim().replace(/\/$/, "");
+  const trimmed = value.trim().replace(/\/$/, "");
+  if (!trimmed) return trimmed;
+  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
 }
 
 export function getCanonicalSiteOrigin(): string {
