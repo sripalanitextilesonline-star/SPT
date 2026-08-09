@@ -360,6 +360,7 @@ async function uploadBase64Image(
     processed.contentType,
     processed.extension,
     "velo-product",
+    { auth: "trusted-server" },
   );
 
   const [inserted] = await db
