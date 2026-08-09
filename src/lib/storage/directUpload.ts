@@ -66,10 +66,7 @@ async function hasMediaBucketBinding(): Promise<boolean> {
   }
 }
 
-function assertUploadLimits(params: {
-  fileSize: number;
-  contentType: string;
-}) {
+function assertUploadLimits(params: { fileSize: number; contentType: string }) {
   if (params.fileSize <= 0) {
     throw new Error("File is empty.");
   }

@@ -23,9 +23,9 @@ describe("velo-upload-token", () => {
     const { token, expiresAt } = createMediaProxyUploadToken(key, 300);
     expect(expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(verifyMediaProxyUploadToken(token, key)).toBe(true);
-    expect(verifyMediaProxyUploadToken(token, "uploads/staging/other.webp")).toBe(
-      false,
-    );
+    expect(
+      verifyMediaProxyUploadToken(token, "uploads/staging/other.webp"),
+    ).toBe(false);
   });
 
   it("builds the proxy upload URL", () => {

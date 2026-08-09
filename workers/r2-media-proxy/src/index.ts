@@ -54,11 +54,7 @@ function corsHeaders(request: Request): HeadersInit {
   };
 }
 
-function jsonResponse(
-  request: Request,
-  body: unknown,
-  status = 200,
-): Response {
+function jsonResponse(request: Request, body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -92,7 +88,8 @@ function sanitizeKey(raw: string | null): string | null {
 
 function base64UrlToBytes(value: string): Uint8Array {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+  const pad =
+    padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
   const binary = atob(padded + pad);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
@@ -105,7 +102,10 @@ function bytesToBase64Url(bytes: ArrayBuffer): string {
   for (let i = 0; i < view.length; i += 1) {
     binary += String.fromCharCode(view[i]!);
   }
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 async function hmacSign(secret: string, payload: string): Promise<string> {
