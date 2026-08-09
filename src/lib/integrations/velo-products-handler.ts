@@ -3,7 +3,8 @@ import {
   deleteCategoryProductsBatch,
   deleteOrArchiveProducts,
 } from "@/lib/admin/product-lifecycle";
-import { invalidateStorefrontCache } from "@/lib/cache/invalidate-storefront";
+import { invalidateStorefrontCollectionsCache } from "@/lib/cache/invalidate-storefront";
+import { veloActionSkipsIdempotency } from "@/lib/integrations/velo-cache-policy";
 import {
   getProductSizeConfigsByProductIds,
   normalizeProductSizeConfig,
@@ -238,7 +239,8 @@ async function revalidateCollectionPages() {
   revalidatePath("/collections", "layout");
   revalidatePath("/shop");
   revalidatePath("/admin/collections");
-  await invalidateStorefrontCache();
+  // Scoped bust — full invalidateStorefrontCache is reserved for product writes.
+  await invalidateStorefrontCollectionsCache();
 }
 
 /** Prefer newest product photo in the category when no category image is set. */
@@ -696,7 +698,7 @@ export async function handleVeloProductsRequest(
     };
   }
 
-  if (response.ok) {
+  if (response.ok && !veloActionSkipsIdempotency(body.action)) {
     await saveIdempotentResponse(requestId, response);
   }
 
