@@ -273,7 +273,9 @@ export async function finalizeDirectUpload(params: {
   } catch (promoteError) {
     // Fall back only when promote/HEAD unavailable — keep uploads working.
     const message =
-      promoteError instanceof Error ? promoteError.message : String(promoteError);
+      promoteError instanceof Error
+        ? promoteError.message
+        : String(promoteError);
     const hardFail =
       /empty file|too large|only image|not found|invalid staging/i.test(
         message,

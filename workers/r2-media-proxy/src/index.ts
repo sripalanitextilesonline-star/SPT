@@ -230,7 +230,11 @@ export default {
 
       const src = await env.MEDIA_BUCKET.get(fromKey);
       if (!src) {
-        return jsonResponse(request, { error: "Staging object not found." }, 404);
+        return jsonResponse(
+          request,
+          { error: "Staging object not found." },
+          404,
+        );
       }
 
       const contentType =
