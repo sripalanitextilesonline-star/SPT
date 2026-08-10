@@ -5,6 +5,7 @@ import {
   UNPAID_ORDER_RETENTION_DAYS,
 } from "@/lib/admin/product-lifecycle-policy";
 import { classifyProductDeleteTargets } from "@/lib/admin/product-lifecycle-classify";
+import { isMediaSafeToPurge } from "@/lib/admin/product-lifecycle-media";
 import { deleteMediaStorageKeys } from "@/lib/storage/deleteMediaFiles";
 import db from "@/lib/supabase/db";
 import {
@@ -90,6 +91,40 @@ async function collectProductMediaIds(productId: string): Promise<string[]> {
   return [...ids];
 }
 
+/** Max orphan media rows cleaned per lifecycle cron run. */
+export const ORPHAN_MEDIA_PURGE_LIMIT = 40;
+
+/**
+ * Delete medias that are unused by products/collections/testimonials/banners.
+ * Safe after product rows are already gone (DB-first deletes).
+ */
+export async function deleteUnusedMedias(mediaIds: string[]) {
+  const uniqueIds = [...new Set(mediaIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) return { deletedMedia: 0 };
+
+  const { usageByMedia } = await loadMediaUsageForDelete(uniqueIds);
+  const keysToDelete: string[] = [];
+  const mediaIdsToDelete: string[] = [];
+
+  for (const mediaId of uniqueIds) {
+    const usage = usageByMedia.get(mediaId);
+    if (!isMediaSafeToPurge(usage)) continue;
+
+    const mediaRow = await db.query.medias.findFirst({
+      where: eq(medias.id, mediaId),
+      columns: { key: true },
+    });
+    if (mediaRow?.key) keysToDelete.push(mediaRow.key);
+    mediaIdsToDelete.push(mediaId);
+  }
+
+  await deleteMediaStorageKeys(keysToDelete);
+  if (mediaIdsToDelete.length > 0) {
+    await db.delete(medias).where(inArray(medias.id, mediaIdsToDelete));
+  }
+  return { deletedMedia: mediaIdsToDelete.length };
+}
+
 async function deleteExclusiveProductMedias(
   mediaIds: string[],
   productId: string,
@@ -129,24 +164,35 @@ async function deleteExclusiveProductMedias(
   }
 }
 
+/**
+ * Hard-delete products from the catalog (DB first).
+ * Photo/R2 cleanup is best-effort and non-blocking; cron purgeOrphanMedias
+ * is the durable safety net so seller delete stays fast.
+ */
 export async function deleteProductsCompletely(productIds: string[]) {
   const uniqueIds = [...new Set(productIds)];
   if (uniqueIds.length === 0) return;
 
-  const mediaByProduct = new Map<string, string[]>();
+  const mediaIds = new Set<string>();
   await Promise.all(
     uniqueIds.map(async (productId) => {
-      mediaByProduct.set(productId, await collectProductMediaIds(productId));
+      for (const id of await collectProductMediaIds(productId)) {
+        mediaIds.add(id);
+      }
     }),
   );
 
   await db.delete(products).where(inArray(products.id, uniqueIds));
 
-  await Promise.all(
-    [...mediaByProduct.entries()].map(([productId, mediaIds]) =>
-      deleteExclusiveProductMedias(mediaIds, productId),
-    ),
-  );
+  if (mediaIds.size > 0) {
+    const ids = [...mediaIds];
+    void deleteUnusedMedias(ids).catch((error) => {
+      console.error(
+        "[lifecycle] best-effort media cleanup after product delete failed:",
+        error,
+      );
+    });
+  }
 }
 
 export async function archiveProductsWithPaidHistory(
@@ -272,7 +318,21 @@ export async function deleteCategoryProductsBatch(
   const totalProducts = Number(productCount ?? 0);
 
   if (totalProducts === 0) {
+    const [collectionMedia] = await db
+      .select({ featuredImageId: collections.featuredImageId })
+      .from(collections)
+      .where(eq(collections.id, collectionId))
+      .limit(1);
     await db.delete(collections).where(eq(collections.id, collectionId));
+    const featuredId = collectionMedia?.featuredImageId;
+    if (featuredId) {
+      void deleteUnusedMedias([featuredId]).catch((error) => {
+        console.error(
+          "[lifecycle] best-effort category media cleanup failed:",
+          error,
+        );
+      });
+    }
     return {
       deletedIds: [],
       archivedIds: [],
@@ -305,8 +365,22 @@ export async function deleteCategoryProductsBatch(
   let collectionDeleted = false;
 
   if (remainingCount === 0) {
+    const [collectionMedia] = await db
+      .select({ featuredImageId: collections.featuredImageId })
+      .from(collections)
+      .where(eq(collections.id, collectionId))
+      .limit(1);
     await db.delete(collections).where(eq(collections.id, collectionId));
     collectionDeleted = true;
+    const featuredId = collectionMedia?.featuredImageId;
+    if (featuredId) {
+      void deleteUnusedMedias([featuredId]).catch((error) => {
+        console.error(
+          "[lifecycle] best-effort category media cleanup failed:",
+          error,
+        );
+      });
+    }
   }
 
   return {
@@ -315,6 +389,40 @@ export async function deleteCategoryProductsBatch(
     done: collectionDeleted,
     collectionDeleted,
   };
+}
+
+/**
+ * Durable cleanup for medias left behind by DB-first product/category deletes.
+ * Skips anything still referenced by products, collections, testimonials, or banners.
+ */
+export async function purgeOrphanMedias(
+  limit = ORPHAN_MEDIA_PURGE_LIMIT,
+): Promise<{ purgedOrphanMedia: number }> {
+  const max = Math.max(1, Math.min(100, limit));
+
+  // Candidate query: no FK refs in core tables. Banner JSON usage is re-checked
+  // inside deleteUnusedMedias via loadMediaUsageForDelete.
+  const candidates = await db
+    .select({ id: medias.id })
+    .from(medias)
+    .where(
+      sql`
+        NOT EXISTS (SELECT 1 FROM products p WHERE p.featured_image_id = ${medias.id})
+        AND NOT EXISTS (SELECT 1 FROM product_medias pm WHERE pm.media_id = ${medias.id})
+        AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.featured_image_id = ${medias.id})
+        AND NOT EXISTS (SELECT 1 FROM testimonials t WHERE t.featured_image_id = ${medias.id})
+      `,
+    )
+    .orderBy(medias.id)
+    .limit(max);
+
+  const ids = candidates.map((row) => row.id).filter(Boolean);
+  if (ids.length === 0) {
+    return { purgedOrphanMedia: 0 };
+  }
+
+  const result = await deleteUnusedMedias(ids);
+  return { purgedOrphanMedia: result.deletedMedia };
 }
 
 export async function purgeArchivedProductMedia() {
@@ -334,6 +442,7 @@ export async function purgeArchivedProductMedia() {
     await backfillOrderLineSnapshotsForProduct(id);
     const mediaIds = await collectProductMediaIds(id);
     await db.delete(products).where(eq(products.id, id));
+    // Archive purge can await — cron path, not seller request path.
     await deleteExclusiveProductMedias(mediaIds, id);
   }
 
@@ -364,5 +473,6 @@ export async function deleteStaleUnpaidOrders() {
 export async function runLifecycleCleanup() {
   const unpaid = await deleteStaleUnpaidOrders();
   const archive = await purgeArchivedProductMedia();
-  return { ...unpaid, ...archive };
+  const orphans = await purgeOrphanMedias();
+  return { ...unpaid, ...archive, ...orphans };
 }
