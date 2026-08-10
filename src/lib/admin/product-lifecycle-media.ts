@@ -8,7 +8,9 @@ export type MediaUsageCounts = {
   bannerSlideCount?: number;
 };
 
-export function isMediaSafeToPurge(usage: MediaUsageCounts | undefined): boolean {
+export function isMediaSafeToPurge(
+  usage: MediaUsageCounts | undefined,
+): boolean {
   if (!usage) return true;
   if ((usage.productIds?.length ?? 0) > 0) return false;
   if ((usage.productCount ?? 0) > 0) return false;

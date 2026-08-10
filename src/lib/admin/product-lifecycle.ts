@@ -99,7 +99,9 @@ export const ORPHAN_MEDIA_PURGE_LIMIT = 40;
  * Safe after product rows are already gone (DB-first deletes).
  */
 export async function deleteUnusedMedias(mediaIds: string[]) {
-  const uniqueIds = [...new Set(mediaIds.map((id) => id.trim()).filter(Boolean))];
+  const uniqueIds = [
+    ...new Set(mediaIds.map((id) => id.trim()).filter(Boolean)),
+  ];
   if (uniqueIds.length === 0) return { deletedMedia: 0 };
 
   const { usageByMedia } = await loadMediaUsageForDelete(uniqueIds);
