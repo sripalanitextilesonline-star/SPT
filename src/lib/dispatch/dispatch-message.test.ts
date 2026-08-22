@@ -8,7 +8,8 @@ describe("buildDispatchNotificationText", () => {
       courierName: "DTDC",
       trackingNumber: "D123456789",
       dispatchedAt: "2026-08-20T10:30:00.000Z",
-      trackingUrlTemplate: "https://tracking.dtdc.com/ctbs-tracking/customerInterface.tr?submitType=get498498Status498498&cType=Consignment&cnNo={tracking}",
+      trackingUrlTemplate:
+        "https://tracking.dtdc.com/ctbs-tracking/customerInterface.tr?submitType=get498498Status498498&cType=Consignment&cnNo={tracking}",
     });
     expect(text).toContain("Your order has been dispatched.");
     expect(text).toContain("Order ID: SPT-001");

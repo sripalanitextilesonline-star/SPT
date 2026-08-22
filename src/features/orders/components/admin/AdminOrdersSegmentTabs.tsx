@@ -182,8 +182,7 @@ export function AdminOrdersSegmentTabs({
     } catch (error) {
       toast({
         title: "Failed to generate packing slips",
-        description:
-          error instanceof Error ? error.message : "Unknown error",
+        description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
     } finally {

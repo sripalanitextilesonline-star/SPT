@@ -151,8 +151,7 @@ function AdminOrderRow({
     } catch (error) {
       toast({
         title: "Failed to generate packing slip",
-        description:
-          error instanceof Error ? error.message : "Unknown error",
+        description: error instanceof Error ? error.message : "Unknown error",
         variant: "destructive",
       });
     } finally {

@@ -31,7 +31,9 @@ describe("buildCourierTrackingUrl", () => {
   });
 
   it("rejects non-http protocols", () => {
-    expect(buildCourierTrackingUrl("ftp://example.com/{tracking}", "T1")).toBeNull();
+    expect(
+      buildCourierTrackingUrl("ftp://example.com/{tracking}", "T1"),
+    ).toBeNull();
   });
 });
 
