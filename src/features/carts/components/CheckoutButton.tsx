@@ -70,6 +70,8 @@ function CheckoutButton({
   );
 
   const handleCheckoutComplete = async (shipping: SavedShippingAddress) => {
+    setOpen(false);
+    await new Promise((r) => setTimeout(r, 80));
     setIsLoading(true);
     try {
       await startCheckout({

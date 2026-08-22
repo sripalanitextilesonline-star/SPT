@@ -260,7 +260,11 @@ export async function syncPhonePeOrderPayment(input: SyncInput) {
   };
 }
 
-export async function syncCashfreeOrderPayment(orderId: string) {
+export async function syncCashfreeOrderPayment(
+  orderId: string,
+  options?: { runSideEffects?: boolean },
+) {
+  const shouldRunSideEffects = options?.runSideEffects !== false;
   const currentOrder = await db.query.orders.findFirst({
     where: eq(orders.id, orderId),
   });
@@ -270,9 +274,9 @@ export async function syncCashfreeOrderPayment(orderId: string) {
   }
 
   if (currentOrder.payment_status === "paid") {
-    // Complete any side effects a prior attempt missed (idempotent no-op
-    // when everything already ran).
-    await ensurePaidOrderSideEffects(currentOrder);
+    if (shouldRunSideEffects) {
+      await ensurePaidOrderSideEffects(currentOrder);
+    }
     return {
       orderId: currentOrder.id,
       state: "PAID",
@@ -362,12 +366,14 @@ export async function syncCashfreeOrderPayment(orderId: string) {
     };
   }
 
-  if (isPaid) {
-    await runPaidOrderSideEffects(updated);
-  } else if (isTerminalFailure) {
-    await maybeReleaseUnpaidReservation(updated.id, "payment_failed");
-  } else {
-    await maybeReleaseExpiredReservation(updated.id);
+  if (shouldRunSideEffects) {
+    if (isPaid) {
+      await runPaidOrderSideEffects(updated);
+    } else if (isTerminalFailure) {
+      await maybeReleaseUnpaidReservation(updated.id, "payment_failed");
+    } else {
+      await maybeReleaseExpiredReservation(updated.id);
+    }
   }
 
   return {

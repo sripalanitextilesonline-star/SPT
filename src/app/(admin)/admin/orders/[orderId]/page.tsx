@@ -1,5 +1,9 @@
 import AdminShell from "@/components/admin/AdminShell";
 import AdminOrderDetailView from "@/features/orders/components/admin/AdminOrderDetailView";
+import { getSessionUser } from "@/lib/auth/admin";
+import { formatOrderDateTimeIst } from "@/lib/datetime/india";
+import { buildDispatchNotificationText } from "@/lib/dispatch/dispatch-message";
+import { getOrderDispatchInfo } from "@/lib/dispatch/get-order-dispatch-info";
 import {
   resolveOrderLineImageAlt,
   resolveOrderLineImageKey,
@@ -8,17 +12,17 @@ import {
   resolveOrderLineProductSlug,
 } from "@/lib/orders/order-line-display";
 import { buildShippingAddressCopyText } from "@/lib/orders/shipping-address-text";
-import { formatOrderDateTimeIst } from "@/lib/datetime/india";
 import { keytoUrl } from "@/lib/utils";
 import db from "@/lib/supabase/db";
 import {
   address,
+  dispatchCouriers,
   medias,
   orderLines,
   orders,
   products,
 } from "@/lib/supabase/schema";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -180,6 +184,28 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
     addressText,
   });
 
+  const sessionUser = await getSessionUser();
+  const dispatchInfo = await getOrderDispatchInfo(orderId);
+  const dispatchCouriersList = await db
+    .select({
+      id: dispatchCouriers.id,
+      name: dispatchCouriers.name,
+      trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
+    })
+    .from(dispatchCouriers)
+    .where(eq(dispatchCouriers.isActive, true))
+    .orderBy(asc(dispatchCouriers.name));
+  const dispatchNotificationText = dispatchInfo
+    ? buildDispatchNotificationText({
+        orderId: orderView.id,
+        customerName: orderView.customerName,
+        courierName: dispatchInfo.courierName,
+        trackingNumber: dispatchInfo.trackingNumber,
+        dispatchedAt: dispatchInfo.dispatchedAt,
+        trackingUrlTemplate: dispatchInfo.trackingUrlTemplate,
+      })
+    : null;
+
   return (
     <AdminShell
       heading={`Order #${orderView.id}`}
@@ -191,6 +217,10 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
         items={itemViews}
         copyAddressText={addressText}
         courierCopyText={courierCopyText}
+        dispatchCouriers={dispatchCouriersList}
+        dispatchInfo={dispatchInfo}
+        dispatchNotificationText={dispatchNotificationText}
+        adminUserId={sessionUser?.id ?? "admin"}
       />
     </AdminShell>
   );

@@ -1,6 +1,7 @@
 import { siteConfig } from "@/config/site";
 import type { AdminOrderListView } from "@/lib/admin/getAdminOrdersList";
 import type { PdfLabelOrder } from "@/lib/pdf/shipping-label-pdf";
+import type { PackingSlipOrder } from "@/lib/pdf/packing-slip-pdf";
 
 /** Shop FROM block for parcel labels (matches Software-Saree-order sender_details). */
 export function buildAdminPdfSenderDetails(): string {
@@ -30,4 +31,29 @@ export function adminOrdersToPdfLabels(
 ): PdfLabelOrder[] {
   const sender = buildAdminPdfSenderDetails();
   return orders.map((order) => adminOrderToPdfLabel(order, sender));
+}
+
+/** Map an AdminOrderListView to packing-slip data. */
+export function adminOrderToPackingSlip(
+  order: AdminOrderListView,
+): PackingSlipOrder {
+  return {
+    id: order.id,
+    createdAt: order.createdAt,
+    customerName: order.customerName,
+    customerMobile: order.customerMobile,
+    shippingAddress: order.shippingAddress,
+    items: order.lines.map((line) => ({
+      name: line.productName,
+      quantity: line.quantity,
+      imageUrl: line.imageUrl,
+    })),
+  };
+}
+
+/** Map multiple orders for bulk packing-slip download. */
+export function adminOrdersToPackingSlips(
+  orders: AdminOrderListView[],
+): PackingSlipOrder[] {
+  return orders.map(adminOrderToPackingSlip);
 }

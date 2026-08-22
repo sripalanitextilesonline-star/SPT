@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { PhoneCall, ShoppingBag } from "lucide-react";
+import { Mail, PhoneCall, ShoppingBag } from "lucide-react";
 import { Icons } from "@/components/layouts/icons";
 import { useCartCount } from "@/features/carts/hooks/useCartCount";
 import { contactActionHref, type StoreContact } from "@/lib/contact/links";
@@ -42,6 +42,7 @@ export function StoreFloatingActions() {
     () => usableContacts(storefrontContact.contacts),
     [storefrontContact.contacts],
   );
+  const shopEmail = storefrontContact.email?.trim() || "";
   const [openPicker, setOpenPicker] = useState<ContactPickerMode | null>(null);
 
   const handlePickerChange = useCallback(
@@ -123,6 +124,16 @@ export function StoreFloatingActions() {
               <Icons.whatsapp className="h-5 w-5" />
             </a>
           )
+        ) : null}
+
+        {shopEmail ? (
+          <a
+            href={`mailto:${shopEmail}`}
+            className={`${floatingActionButtonClass} border border-border bg-card text-foreground shadow-sm`}
+            aria-label={`Email Sri Palani Textiles at ${shopEmail}`}
+          >
+            <Mail className="h-5 w-5" strokeWidth={1.75} />
+          </a>
         ) : null}
       </div>
     </>

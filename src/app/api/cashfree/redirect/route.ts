@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    await syncCashfreeOrderPayment(orderId);
+    await syncCashfreeOrderPayment(orderId, { runSideEffects: false });
   } catch (error) {
     console.error("[cashfree] redirect sync failed:", error);
   }

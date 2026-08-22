@@ -138,8 +138,10 @@ export function CheckoutAddressDialog({
     onProgress?.(creatingOrderProgress());
     try {
       const shipping = await getSavedShippingAddress(selectedId);
-      await onComplete(shipping);
+      // Close first so Cashfree/checkout overlay isn't blocked by the dialog.
       onOpenChange(false);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await onComplete(shipping);
     } catch (err) {
       onCheckoutError?.();
       toast({
@@ -161,8 +163,9 @@ export function CheckoutAddressDialog({
         guest ? null : userId ?? null,
         { setAsDefault: !guest && addresses.length === 0 },
       );
-      await onComplete(saved);
       onOpenChange(false);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await onComplete(saved);
     } catch (err) {
       onCheckoutError?.();
       toast({

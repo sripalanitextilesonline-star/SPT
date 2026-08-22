@@ -13,6 +13,14 @@ const shippingLabelPdfStub = path.resolve(
   __dirname,
   "src/lib/pdf/shipping-label-pdf.stub.ts",
 );
+const packingSlipPdf = path.resolve(
+  __dirname,
+  "src/lib/pdf/packing-slip-pdf.ts",
+);
+const packingSlipPdfStub = path.resolve(
+  __dirname,
+  "src/lib/pdf/packing-slip-pdf.stub.ts",
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -103,6 +111,7 @@ const nextConfig = {
             jspdf: false,
             // Shipping-label PDF + jsPDF are browser-only; stub on SSR/Worker.
             [shippingLabelPdf]: shippingLabelPdfStub,
+            [packingSlipPdf]: packingSlipPdfStub,
           }
         : {}),
     };

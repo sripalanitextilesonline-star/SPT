@@ -11,11 +11,15 @@ import { clampAdminOrdersPageSize } from "@/lib/admin/admin-orders-pagination";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
-import { adminOrdersToPdfLabels } from "@/lib/pdf/admin-order-pdf-label";
+import {
+  adminOrdersToPdfLabels,
+  adminOrdersToPackingSlips,
+} from "@/lib/pdf/admin-order-pdf-label";
 import {
   downloadOrdersPdf,
   PdfAddressTooLongError,
 } from "@/lib/pdf/shipping-label-pdf";
+import { downloadOrdersPdf as downloadPackingSlipsPdf } from "@/lib/pdf/packing-slip-pdf";
 import { cn } from "@/lib/utils";
 
 export type OrdersSegment = "paid" | "unpaid";
@@ -83,6 +87,7 @@ export function AdminOrdersSegmentTabs({
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const [downloadingBulkPdf, setDownloadingBulkPdf] = React.useState(false);
+  const [downloadingBulkSlip, setDownloadingBulkSlip] = React.useState(false);
   const [loadingTo, setLoadingTo] = React.useState<OrdersSegment | null>(null);
   const [navError, setNavError] = React.useState<string | null>(null);
 
@@ -164,6 +169,27 @@ export function AdminOrdersSegmentTabs({
       setDownloadingBulkPdf(false);
     }
   }, [downloadingBulkPdf, paid.rows, toast]);
+
+  const downloadBulkSlip = React.useCallback(async () => {
+    if (downloadingBulkSlip || paid.rows.length === 0) return;
+    setDownloadingBulkSlip(true);
+    try {
+      await downloadPackingSlipsPdf(adminOrdersToPackingSlips(paid.rows));
+      toast({
+        title: "Packing slips downloaded",
+        description: `Packing slips for ${paid.rows.length} paid order${paid.rows.length === 1 ? "" : "s"} on this page.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to generate packing slips",
+        description:
+          error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingBulkSlip(false);
+    }
+  }, [downloadingBulkSlip, paid.rows, toast]);
 
   return (
     <div className="space-y-4">
@@ -278,21 +304,38 @@ export function AdminOrdersSegmentTabs({
         </p>
 
         {showPdfToolbar ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => void downloadBulkPdf()}
-            disabled={downloadingBulkPdf || paid.rows.length === 0}
-            title="Download shipping label PDF for paid orders on this page"
-          >
-            {downloadingBulkPdf ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <FileDown className="mr-2 h-4 w-4" />
-            )}
-            {downloadingBulkPdf ? "Generating…" : "PDF"}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void downloadBulkPdf()}
+              disabled={downloadingBulkPdf || paid.rows.length === 0}
+              title="Download shipping labels for paid orders on this page"
+            >
+              {downloadingBulkPdf ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              {downloadingBulkPdf ? "Generating…" : "Labels"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void downloadBulkSlip()}
+              disabled={downloadingBulkSlip || paid.rows.length === 0}
+              title="Download packing slips for paid orders on this page"
+            >
+              {downloadingBulkSlip ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              {downloadingBulkSlip ? "Generating…" : "Slips"}
+            </Button>
+          </div>
         ) : null}
       </div>
 

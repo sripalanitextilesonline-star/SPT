@@ -43,6 +43,8 @@ function BuyNowButton({ productId, quantity = 1, stock }: BuyNowButtonProps) {
   );
 
   const handleCheckoutComplete = async (shipping: SavedShippingAddress) => {
+    setOpen(false);
+    await new Promise((r) => setTimeout(r, 80));
     setIsProcessing(true);
     try {
       await startCheckout({

@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { CheckCircle2, Circle, Package, Truck } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  ExternalLink,
+  Package,
+  Truck,
+} from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { Shell } from "@/components/layouts/Shell";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import OrderCompletionCleaner from "@/features/orders/components/OrderCompletionCleaner";
 import { canViewOrder } from "@/lib/auth/order-access";
 import { appendFromToSignIn } from "@/lib/auth/redirect";
+import { formatOrderDateTimeIst } from "@/lib/datetime/india";
+import { getOrderDispatchInfo } from "@/lib/dispatch/get-order-dispatch-info";
 import {
   resolveOrderLineImageAlt,
   resolveOrderLineImageKey,
@@ -141,6 +149,7 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
     postalCode: order.addressPostalCode,
     country: order.addressCountry,
   });
+  const dispatchInfo = await getOrderDispatchInfo(orderId);
 
   return (
     <Shell layout="narrow">
@@ -201,6 +210,42 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
             </div>
           </CardContent>
         </Card>
+
+        {dispatchInfo ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Shipment Tracking</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p>
+                <span className="text-muted-foreground">Courier:</span>{" "}
+                {dispatchInfo.courierName}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Dispatched:</span>{" "}
+                {formatOrderDateTimeIst(dispatchInfo.dispatchedAt)}
+              </p>
+              {dispatchInfo.trackingNumber ? (
+                <p className="break-all">
+                  <span className="text-muted-foreground">Tracking number:</span>{" "}
+                  {dispatchInfo.trackingNumber}
+                </p>
+              ) : null}
+              {dispatchInfo.trackingUrl ? (
+                <Button asChild>
+                  <a
+                    href={dispatchInfo.trackingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Track shipment
+                  </a>
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <div className="grid gap-4 md:grid-cols-3">
           <Card>
