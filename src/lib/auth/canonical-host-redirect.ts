@@ -1,16 +1,15 @@
-/** Hosts that should never be redirected (local dev / preview). */
+/** Hosts that should never be redirected (local dev only). */
 export function isLocalOrPreviewHost(host: string): boolean {
-  return (
-    !host ||
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host.endsWith(".vercel.app")
-  );
+  return !host || host === "localhost" || host === "127.0.0.1";
 }
 
-/** Cloudflare default URLs — redirect to the shop custom domain in production. */
+/** Platform default URLs — redirect to the shop custom domain in production. */
 export function isPlatformDefaultHost(host: string): boolean {
-  return host.endsWith(".workers.dev") || host.endsWith(".pages.dev");
+  return (
+    host.endsWith(".workers.dev") ||
+    host.endsWith(".pages.dev") ||
+    host.endsWith(".vercel.app")
+  );
 }
 
 export function isCanonicalShopHost(

@@ -1,7 +1,8 @@
 name: Keep storefront warm
 
-# Schedules removed after Vercel migration — run manually via workflow_dispatch if needed.
 on:
+  schedule:
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,7 +22,7 @@ jobs:
       - name: Warm public routes
         shell: bash
         env:
-          SITE_ORIGIN: https://hubsofcraftss.com
+          SITE_ORIGIN: https://sripalanitextiles.com
         run: |
           set -euo pipefail
 
@@ -46,7 +47,7 @@ jobs:
                 --retry-delay 2 \
                 --retry-max-time 150 \
                 --retry-all-errors \
-                --user-agent "HubOfCraftss-Production-Warmup/1.0" \
+                --user-agent "SPT-Production-Warmup/1.0" \
                 --output "$body" \
                 --write-out "%{http_code} %{url_effective}" \
                 "${SITE_ORIGIN}${path}"
@@ -78,7 +79,6 @@ jobs:
             rm -f "$body"
           }
 
-          # Exercise both the lightweight API runtime and important rendered routes.
           check_route "/api/health" '"status":"ok"'
           check_route "/"
           check_route "/shop"
@@ -86,13 +86,13 @@ jobs:
       - name: Release expired stock reservations
         shell: bash
         env:
-          SITE_ORIGIN: https://hubsofcraftss.com
+          SITE_ORIGIN: https://sripalanitextiles.com
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
 
           if [[ -z "${CRON_SECRET}" ]]; then
-            echo "::notice title=Cron skipped::CRON_SECRET repo secret is not set; expired stock holds rely on the lazy in-request sweep only."
+            echo "::notice title=Cron skipped::CRON_SECRET repo secret is not set."
             exit 0
           fi
 
@@ -106,7 +106,7 @@ jobs:
               --retry 2 \
               --retry-delay 3 \
               --header "Authorization: Bearer ${CRON_SECRET}" \
-              --user-agent "HubOfCraftss-Production-Warmup/1.0" \
+              --user-agent "SPT-Production-Warmup/1.0" \
               "${SITE_ORIGIN}/api/cron/release-expired-stock-reservations"
           )"
 

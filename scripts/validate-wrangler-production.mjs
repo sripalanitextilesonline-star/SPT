@@ -74,4 +74,17 @@ if (config.account_id !== identity.cloudflare.accountId) {
   fail(`Expected account_id "${identity.cloudflare.accountId}", got "${config.account_id}"`);
 }
 
+const canonicalHost = new URL(identity.site.canonicalUrl).hostname;
+const wwwHost = canonicalHost.startsWith("www.")
+  ? canonicalHost
+  : `www.${canonicalHost}`;
+const routePatterns = new Set(
+  (config.routes || []).map((route) => String(route.pattern ?? "").trim()),
+);
+for (const required of [canonicalHost, wwwHost]) {
+  if (!routePatterns.has(required)) {
+    fail(`Missing custom domain route for ${required}`);
+  }
+}
+
 console.log(`[validate-wrangler] OK ${path.relative(root, configPath)}`);

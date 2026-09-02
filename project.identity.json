@@ -10,20 +10,19 @@
     "canonicalUrl": "https://sripalanitextiles.com",
     "productionOrigins": [
       "https://sripalanitextiles.com",
-      "https://www.sripalanitextiles.com",
-      "https://sri-palani-textiles.vercel.app"
+      "https://www.sripalanitextiles.com"
     ],
     "localOrigins": [
       "http://localhost:3000",
       "http://127.0.0.1:3000"
     ],
     "previewOriginPatterns": [
-      "https://*.vercel.app"
+      "https://*.workers.dev",
+      "https://*.pages.dev"
     ],
     "authRedirectOrigins": [
       "https://sripalanitextiles.com",
       "https://www.sripalanitextiles.com",
-      "https://sri-palani-textiles.vercel.app",
       "http://localhost:3000",
       "http://127.0.0.1:3000"
     ]
@@ -36,6 +35,7 @@
   "cloudflare": {
     "accountEmail": "sripalanitextilesonline@gmail.com",
     "accountId": "aaa80267f9d75b8a485ef7139a1e9256",
+    "primaryHosting": true,
     "workers": {
       "storefront": {
         "name": "sri-palani-textiles",
@@ -65,6 +65,8 @@
     }
   },
   "vercel": {
+    "deprecated": true,
+    "note": "Production runs on Cloudflare Workers. Do not deploy to Vercel.",
     "teamId": "team_x5P3xflwaglYdNIbYNc3RHfC",
     "projectId": "prj_NLya0v0DC2NVvjLWrzw7ScirzK39",
     "projectName": "sri-palani-textiles",

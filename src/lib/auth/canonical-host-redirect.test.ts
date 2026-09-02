@@ -13,6 +13,16 @@ describe("buildCanonicalRedirectUrl", () => {
     ).toBe("https://example.com/shop");
   });
 
+  it("redirects vercel.app to the custom domain", () => {
+    expect(
+      buildCanonicalRedirectUrl(
+        "https://sri-palani-textiles.vercel.app/shop",
+        "sri-palani-textiles.vercel.app",
+        CANONICAL,
+      ),
+    ).toBe("https://example.com/shop");
+  });
+
   it("preserves query strings through redirect", () => {
     expect(
       buildCanonicalRedirectUrl(

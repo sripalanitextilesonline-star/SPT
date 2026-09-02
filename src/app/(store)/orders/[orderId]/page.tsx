@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  AlertCircle,
   CheckCircle2,
   Circle,
   ExternalLink,
@@ -22,6 +23,14 @@ import {
   resolveOrderLineProductName,
   resolveOrderLineProductSlug,
 } from "@/lib/orders/order-line-display";
+import {
+  FULFILLMENT_STEPS,
+  resolveFulfillmentStepIndex,
+  resolveStorefrontOrderDescription,
+  resolveStorefrontOrderHeadline,
+  resolveStorefrontOrderPaymentView,
+  shouldShowFulfillmentProgress,
+} from "@/lib/orders/paymentStatus";
 import db from "@/lib/supabase/db";
 import {
   address,
@@ -39,22 +48,32 @@ type TrackOrderProps = {
   searchParams?: Promise<{ token?: string }>;
 };
 
-const STATUS_STEPS = ["ordered", "packed", "shipped", "delivered"] as const;
-
-function normalizeStatus(status: string | null) {
-  const s = String(status ?? "pending")
-    .trim()
-    .toLowerCase();
-  if (s.includes("deliver")) return "delivered";
-  if (s.includes("ship") || s.includes("dispatch")) return "shipped";
-  if (s.includes("pack") || s.includes("prepar")) return "packed";
-  return "ordered";
+function paymentBadgeClass(view: ReturnType<typeof resolveStorefrontOrderPaymentView>) {
+  switch (view) {
+    case "confirmed":
+      return "border-emerald-600 text-emerald-700";
+    case "payment_pending":
+      return "border-amber-600 text-amber-700";
+    case "payment_failed":
+    case "cancelled":
+      return "border-destructive text-destructive";
+    default:
+      return "";
+  }
 }
 
-function currentStepIndex(status: string | null) {
-  const normalized = normalizeStatus(status);
-  const idx = STATUS_STEPS.indexOf(normalized);
-  return idx === -1 ? 0 : idx;
+function paymentAlertClass(view: ReturnType<typeof resolveStorefrontOrderPaymentView>) {
+  switch (view) {
+    case "confirmed":
+      return "border-emerald-200 bg-emerald-50 text-emerald-900";
+    case "payment_pending":
+      return "border-amber-200 bg-amber-50 text-amber-950";
+    case "payment_failed":
+    case "cancelled":
+      return "border-destructive/30 bg-destructive/5 text-destructive";
+    default:
+      return "border-muted bg-muted/40 text-foreground";
+  }
 }
 
 function buildShippingAddress(details: {
@@ -140,7 +159,26 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
     .leftJoin(medias, eq(products.featuredImageId, medias.id))
     .where(eq(orderLines.orderId, orderId));
 
-  const stepIndex = currentStepIndex(order.orderStatus);
+  const paymentView = resolveStorefrontOrderPaymentView({
+    payment_status: order.paymentStatus,
+    order_status: order.orderStatus,
+  });
+  const orderHeadline = resolveStorefrontOrderHeadline({
+    payment_status: order.paymentStatus,
+    order_status: order.orderStatus,
+  });
+  const orderDescription = resolveStorefrontOrderDescription({
+    payment_status: order.paymentStatus,
+    order_status: order.orderStatus,
+  });
+  const stepIndex = resolveFulfillmentStepIndex({
+    payment_status: order.paymentStatus,
+    order_status: order.orderStatus,
+  });
+  const showFulfillmentProgress = shouldShowFulfillmentProgress({
+    payment_status: order.paymentStatus,
+    order_status: order.orderStatus,
+  });
   const shippingLines = buildShippingAddress({
     line1: order.addressLine1,
     line2: order.addressLine2,
@@ -159,12 +197,23 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
         <Card>
           <CardHeader className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-lg sm:text-xl">
-                Order Confirmed
-              </CardTitle>
-              <Badge variant="outline" className="capitalize">
-                {order.paymentStatus}
+              <CardTitle className="text-lg sm:text-xl">{orderHeadline}</CardTitle>
+              <Badge
+                variant="outline"
+                className={`capitalize ${paymentBadgeClass(paymentView)}`}
+              >
+                {order.paymentStatus.replaceAll("_", " ")}
               </Badge>
+            </div>
+            <div
+              className={`flex gap-2 rounded-md border px-3 py-2 text-sm ${paymentAlertClass(paymentView)}`}
+            >
+              {paymentView === "confirmed" ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <p>{orderDescription}</p>
             </div>
             <p className="text-sm text-muted-foreground">
               Order ID:{" "}
@@ -188,26 +237,32 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
             </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {STATUS_STEPS.map((step, idx) => {
-                const completed = idx <= stepIndex;
-                return (
-                  <div
-                    key={step}
-                    className="flex items-center gap-2 rounded-md border px-3 py-2"
-                  >
-                    {completed ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-muted-foreground" />
-                    )}
-                    <span className="text-xs font-medium capitalize">
-                      {step}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            {showFulfillmentProgress ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {FULFILLMENT_STEPS.map((step, idx) => {
+                  const completed = idx <= stepIndex;
+                  return (
+                    <div
+                      key={step}
+                      className="flex items-center gap-2 rounded-md border px-3 py-2"
+                    >
+                      {completed ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <Circle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className="text-xs font-medium capitalize">
+                        {step}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Order tracking will appear here after payment is confirmed.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -324,6 +379,11 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {paymentView === "payment_pending" ? (
+            <Button asChild>
+              <Link href="/cart">Return to cart to pay again</Link>
+            </Button>
+          ) : null}
           <Button asChild variant="outline">
             <Link href="/shop">
               <Package className="mr-2 h-4 w-4" />

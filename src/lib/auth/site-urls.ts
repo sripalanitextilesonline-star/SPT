@@ -4,18 +4,11 @@ import {
   normalizeOrigin,
 } from "@/lib/project/identity";
 
-/** Primary site origin from env when set; otherwise Vercel URL / project identity. */
+/** Primary site origin from env when set; otherwise project identity (Cloudflare canonical). */
 export function getCanonicalSiteOrigin(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (fromEnv) {
     return normalizeOrigin(fromEnv);
-  }
-
-  const vercelUrl =
-    process.env.NEXT_PUBLIC_VERCEL_URL?.trim() ||
-    process.env.VERCEL_URL?.trim();
-  if (vercelUrl) {
-    return normalizeOrigin(vercelUrl);
   }
 
   return getIdentityCanonicalSiteOrigin();

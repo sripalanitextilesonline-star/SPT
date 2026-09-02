@@ -1,4 +1,3 @@
-import SectionHeading from "@/components/layouts/SectionHeading";
 import { Shell } from "@/components/layouts/Shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CollectionBanner } from "@/features/collections";
@@ -7,7 +6,6 @@ import {
   FilterSelections,
   SearchProductsInifiteScroll,
 } from "@/features/search";
-import { STOREFRONT_REVALIDATE_SECONDS } from "@/lib/cache/constants";
 import { getCollectionPageCached } from "@/lib/storefront/collection-detail";
 import { SectionErrorNotice } from "@/components/errors/SectionErrorNotice";
 import { withFallback } from "@/lib/resilience";
@@ -94,10 +92,6 @@ async function CategoryPage({ params, searchParams }: CategoryPageProps) {
   return (
     <Shell>
       <CollectionBanner collectionBannerData={collection} />
-      <SectionHeading
-        heading={collection.label}
-        description={collection.description}
-      />
 
       <Suspense
         fallback={

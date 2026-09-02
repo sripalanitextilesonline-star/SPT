@@ -14,7 +14,7 @@
     "validate:velo-media": "node scripts/validate-velo-media-e2e.cjs",
     "identity:validate:strict": "node scripts/validate-project-identity.mjs --strict-cloudflare-login",
     "preview": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc && opennextjs-cloudflare build --config wrangler.workers.new-account.jsonc && opennextjs-cloudflare preview --config wrangler.workers.new-account.jsonc",
-    "deploy": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc && opennextjs-cloudflare build --config wrangler.workers.new-account.jsonc && opennextjs-cloudflare deploy --config wrangler.workers.new-account.jsonc",
+    "deploy": "node scripts/deploy-cloudflare-production.mjs",
     "deploy:new": "npm run deploy",
     "upload": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc && opennextjs-cloudflare build --config wrangler.workers.new-account.jsonc && opennextjs-cloudflare upload --config wrangler.workers.new-account.jsonc",
     "validate:wrangler": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc",
