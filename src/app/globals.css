@@ -527,63 +527,6 @@ html {
   margin-top: 0.35rem;
 }
 
-/* Two realistic butterflies — always on top, random JS flight */
-.store-butterflies {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  pointer-events: none;
-  overflow: hidden;
-  contain: layout style paint;
-  opacity: 1;
-  transition: opacity 0.85s ease;
-}
-
-.store-butterflies--fade-out {
-  opacity: 0;
-}
-
-.store-butterfly {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: block;
-  width: 28px;
-  height: 28px;
-  opacity: 0.95;
-  will-change: transform;
-  filter: drop-shadow(0 2px 3px rgba(60, 30, 50, 0.18));
-}
-
-.store-butterfly__svg {
-  display: block;
-  overflow: visible;
-}
-
-.store-butterfly__wing {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: butterfly-wing 0.22s ease-in-out infinite alternate;
-}
-
-.store-butterfly__wing--left {
-  transform-origin: right center;
-}
-
-.store-butterfly__wing--right {
-  transform-origin: left center;
-  animation-delay: 0.03s;
-}
-
-@keyframes butterfly-wing {
-  from {
-    transform: scaleX(1) rotate(0deg);
-  }
-  to {
-    transform: scaleX(0.45) rotate(8deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-announcement-scroll {
     animation: none;
@@ -592,10 +535,6 @@ html {
   .animate-whatsapp-glow,
   .animate-phone-glow {
     animation: none;
-  }
-
-  .store-butterflies {
-    display: none;
   }
 
   .announcement-marquee-track {
