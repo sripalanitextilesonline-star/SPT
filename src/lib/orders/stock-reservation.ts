@@ -10,6 +10,7 @@ import {
   type ProductSizeConfig,
 } from "@/lib/products/sizeConfig";
 import db from "@/lib/supabase/db";
+import { runSessionTransaction } from "@/lib/supabase/transactional-db";
 import {
   apiSettings,
   orderLines,
@@ -415,7 +416,7 @@ export async function deductPaidOrderStockAtomic(
   lines: DeductLine[],
 ): Promise<{ ok: boolean; failedProductId?: string }> {
   try {
-    await db.transaction(async (tx) => {
+    await runSessionTransaction(async (tx) => {
       const sortedLines = [...lines].sort((a, b) =>
         a.productId.localeCompare(b.productId),
       );
@@ -452,7 +453,7 @@ export async function deductPaidOrderStockAtomic(
           }
         }
       }
-    });
+    }, "stock:deduct-paid");
     return { ok: true };
   } catch (error) {
     if (error instanceof StockReservationError) {
@@ -506,7 +507,7 @@ export async function releaseStockReservation(
   let released = false;
   let skippedReason: string | undefined;
 
-  await db.transaction(async (tx) => {
+  await runSessionTransaction(async (tx) => {
     const locked = await tx.execute(
       sql`SELECT id, payment_status, payment_meta, created_at FROM orders WHERE id = ${orderId} FOR UPDATE`,
     );
@@ -633,7 +634,7 @@ export async function releaseStockReservation(
       .where(eq(orders.id, orderId));
 
     released = true;
-  });
+  }, "stock:release");
 
   if (released) {
     await invalidateStorefrontCache();

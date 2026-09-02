@@ -48,7 +48,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-export const revalidate = 120;
+export const revalidate = STOREFRONT_REVALIDATE_SECONDS;
 
 type Props = {
   params: Promise<{

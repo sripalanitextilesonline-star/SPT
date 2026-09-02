@@ -37,8 +37,7 @@ const memoryCache = new Map<string, MemoryEntry>();
 function isCloudflareWorkerRuntime() {
   return (
     typeof navigator !== "undefined" &&
-    typeof navigator.userAgent === "string" &&
-    navigator.userAgent.includes("Cloudflare-Workers")
+    navigator.userAgent === "Cloudflare-Workers"
   );
 }
 

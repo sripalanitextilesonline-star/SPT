@@ -3,7 +3,7 @@ import { fetchProductNameSuggestionsCached } from "@/lib/storefront/product-name
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 120;
+export const revalidate = STOREFRONT_REVALIDATE_SECONDS;
 
 const CACHE_HEADERS = {
   "Cache-Control": `public, s-maxage=${STOREFRONT_REVALIDATE_SECONDS}, stale-while-revalidate=300`,

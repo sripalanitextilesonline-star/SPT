@@ -26,6 +26,7 @@ import { createPhonePePayment } from "@/lib/payments/phonepe";
 import { createCashfreePayment } from "@/lib/payments/cashfree";
 import { validatePaymentSessionId } from "@/lib/payments/cashfree-standards";
 import { resolveCheckoutPaymentProvider } from "@/lib/payments/resolve-checkout-provider";
+import { withRetry } from "@/lib/resilience";
 import {
   findChoiceInGroup,
   getActiveOptionGroups,
@@ -366,106 +367,149 @@ export async function POST(request: Request) {
       productsQuantity.map((product) => [product.id, product.name]),
     );
 
-    const insertedOrder = await db.transaction(async (tx) => {
-      const basePaymentMeta = {
-        subtotalAmount,
-        discountAmount,
-        discountPercentage,
-        promoCode: matchedOffer?.code ?? null,
-        discountedSubtotal,
-        courierCharge,
-        gstAmount,
-        gstEnabled: courierConfig.gstEnabled,
-        gstPercentage: courierConfig.gstPercentage,
-        courierState: checkout.shipping.state,
-        courierRule: courierBreakdown.ruleApplied,
-        totalQuantity,
-        paymentEnvironment,
-        linePricing,
-        sizes: selectedSizes,
-        selections: selectedSelections,
-      };
+    const basePaymentMeta = {
+      subtotalAmount,
+      discountAmount,
+      discountPercentage,
+      promoCode: matchedOffer?.code ?? null,
+      discountedSubtotal,
+      courierCharge,
+      gstAmount,
+      gstEnabled: courierConfig.gstEnabled,
+      gstPercentage: courierConfig.gstPercentage,
+      courierState: checkout.shipping.state,
+      courierRule: courierBreakdown.ruleApplied,
+      totalQuantity,
+      paymentEnvironment,
+      linePricing,
+      sizes: selectedSizes,
+      selections: selectedSelections,
+    };
 
-      const created = await tx
-        .insert(orders)
-        .values({
-          user_id: resolveOrderUserId(user?.id),
-          name: checkout.shipping.fullName,
-          email: checkout.shipping.email,
-          addressId: checkout.shipping.addressId,
-          currency: "inr",
-          amount: `${amount}`,
-          order_status: "pending",
-          payment_status: "unpaid",
-          payment_method: checkoutProvider,
-          payment_provider: checkoutProvider,
-          customer_mobile: checkout.shipping.mobile,
-          payment_meta: basePaymentMeta,
-        })
-        .returning();
-
-      const featuredImageIds = [
-        ...new Set(productsQuantity.map((line) => line.featuredImageId)),
-      ];
-      const mediaRows =
-        featuredImageIds.length > 0
-          ? await tx
-              .select({ id: medias.id, key: medias.key })
-              .from(medias)
-              .where(inArray(medias.id, featuredImageIds))
-          : [];
-      const mediaKeyById = new Map(mediaRows.map((row) => [row.id, row.key]));
-
-      await tx.insert(orderLines).values(
-        productsQuantity.map(
-          ({
-            id,
-            quantity,
-            pricing,
-            name,
-            slug,
-            productCode,
-            featuredImageId,
-          }) => ({
-            productId: id,
-            quantity,
-            price: `${pricing.unitPrice}`,
-            orderId: created[0].id,
-            productNameSnapshot: name,
-            productSlugSnapshot: slug,
-            productCodeSnapshot: productCode ?? null,
-            productImageKeySnapshot: mediaKeyById.get(featuredImageId) ?? null,
-          }),
-        ),
-      );
-
-      if (reserveStock) {
-        const reservationMeta = await reserveStockInTransaction(tx, {
-          lines: productsQuantity.map((product) => ({
-            productId: product.id,
-            quantity: product.quantity,
-            size: selectedSizes[product.id] || undefined,
-            selections: selectedSelections[product.id],
-          })),
-          selectedSizes,
-          selectedSelections,
-          sizeConfigs,
-          productNames,
-        });
-
-        const [updatedOrder] = await tx
-          .update(orders)
-          .set({
-            payment_meta: mergePaymentMeta(basePaymentMeta, reservationMeta),
+    // Do not wrap checkout in drizzle.transaction() — postgres.js begin()
+    // crashes on the shared pooler (`reading 'queue'`). Order rows are inserted
+    // sequentially; stock uses atomic updates plus compensate-on-failure.
+    const insertedOrder = await withRetry(
+      async () => {
+        const created = await db
+          .insert(orders)
+          .values({
+            user_id: resolveOrderUserId(user?.id),
+            name: checkout.shipping.fullName,
+            email: checkout.shipping.email,
+            addressId: checkout.shipping.addressId,
+            currency: "inr",
+            amount: `${amount}`,
+            order_status: "pending",
+            payment_status: "unpaid",
+            payment_method: checkoutProvider,
+            payment_provider: checkoutProvider,
+            customer_mobile: checkout.shipping.mobile,
+            payment_meta: basePaymentMeta,
           })
-          .where(eq(orders.id, created[0].id))
           .returning();
 
-        return updatedOrder ? [updatedOrder] : created;
-      }
+        let stockHeld = false;
+        try {
+          const featuredImageIds = [
+            ...new Set(productsQuantity.map((line) => line.featuredImageId)),
+          ];
+          const mediaRows =
+            featuredImageIds.length > 0
+              ? await db
+                  .select({ id: medias.id, key: medias.key })
+                  .from(medias)
+                  .where(inArray(medias.id, featuredImageIds))
+              : [];
+          const mediaKeyById = new Map(
+            mediaRows.map((row) => [row.id, row.key]),
+          );
 
-      return created;
-    });
+          await db.insert(orderLines).values(
+            productsQuantity.map(
+              ({
+                id,
+                quantity,
+                pricing,
+                name,
+                slug,
+                productCode,
+                featuredImageId,
+              }) => ({
+                productId: id,
+                quantity,
+                price: `${pricing.unitPrice}`,
+                orderId: created[0].id,
+                productNameSnapshot: name,
+                productSlugSnapshot: slug,
+                productCodeSnapshot: productCode ?? null,
+                productImageKeySnapshot:
+                  mediaKeyById.get(featuredImageId) ?? null,
+              }),
+            ),
+          );
+
+          if (reserveStock) {
+            const reservationMeta = await reserveStockInTransaction(db, {
+              lines: productsQuantity.map((product) => ({
+                productId: product.id,
+                quantity: product.quantity,
+                size: selectedSizes[product.id] || undefined,
+                selections: selectedSelections[product.id],
+              })),
+              selectedSizes,
+              selectedSelections,
+              sizeConfigs,
+              productNames,
+            });
+            stockHeld = true;
+
+            const [updatedOrder] = await db
+              .update(orders)
+              .set({
+                payment_meta: mergePaymentMeta(
+                  basePaymentMeta,
+                  reservationMeta,
+                ),
+              })
+              .where(eq(orders.id, created[0].id))
+              .returning();
+
+            return updatedOrder ? [updatedOrder] : created;
+          }
+
+          return created;
+        } catch (persistError) {
+          if (stockHeld) {
+            await releaseStockReservation(
+              created[0].id,
+              "checkout_persist_failed",
+              { allowOrphanFallback: true },
+            ).catch(() => undefined);
+          }
+          await db
+            .delete(orderLines)
+            .where(eq(orderLines.orderId, created[0].id))
+            .catch(() => undefined);
+          await db
+            .update(orders)
+            .set({
+              payment_meta: mergePaymentMeta(basePaymentMeta, {
+                checkoutFailedAt: new Date().toISOString(),
+                checkoutFailedReason: String(
+                  persistError instanceof Error
+                    ? persistError.message
+                    : persistError,
+                ).slice(0, 200),
+              }),
+            })
+            .where(eq(orders.id, created[0].id))
+            .catch(() => undefined);
+          throw persistError;
+        }
+      },
+      { label: "checkout:persist", attempts: 3 },
+    );
 
     const order = insertedOrder[0];
     createdOrderId = order.id;
@@ -554,21 +598,35 @@ export async function POST(request: Request) {
       }).catch((releaseErr) => {
         console.error("[checkout] stock release failed:", releaseErr);
       });
+
+      const failReason = String(err instanceof Error ? err.message : err).slice(
+        0,
+        200,
+      );
+      await db
+        .update(orders)
+        .set({
+          payment_meta: mergePaymentMeta({} as Record<string, unknown>, {
+            checkoutFailedAt: new Date().toISOString(),
+            checkoutFailedReason: failReason,
+          }),
+        })
+        .where(eq(orders.id, createdOrderId))
+        .catch(() => undefined);
     }
 
     if (err instanceof StockReservationError) {
       return NextResponse.json({ message: err.message }, { status: 409 });
     }
 
-    console.error("[checkout] create-checkout-session failed:", err);
-    return NextResponse.json(
-      {
-        message: publicErrorMessage(
-          err,
-          "Checkout initiation failed. Please retry.",
-        ),
-      },
-      { status: 500 },
-    );
+    const raw = err instanceof Error ? err.message.trim() : "";
+    console.error("[checkout] create-checkout-session failed:", raw || err);
+
+    const message =
+      raw.startsWith("Cashfree") || raw.includes("mobile number")
+        ? raw
+        : publicErrorMessage(err, "Checkout initiation failed. Please retry.");
+
+    return NextResponse.json({ message }, { status: 500 });
   }
 }
