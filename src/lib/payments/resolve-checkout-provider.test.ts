@@ -10,10 +10,10 @@ const cashfree = {
 };
 
 const phonePe = {
-  merchantId: "merchant",
-  saltKey: "salt",
-  saltIndex: "1",
-  baseUrl: "https://api.phonepe.com/apis/hermes",
+  clientId: "client",
+  clientVersion: "1",
+  clientSecret: "secret",
+  environment: "production" as const,
   enabled: true,
 };
 

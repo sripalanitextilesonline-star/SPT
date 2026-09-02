@@ -47,7 +47,7 @@ const saveSchema = z.object({
 
 const secretFieldsByKey: Record<string, string[]> = {
   [INTEGRATION_KEYS.cashfree]: ["clientSecret"],
-  [INTEGRATION_KEYS.phonepe]: ["saltKey"],
+  [INTEGRATION_KEYS.phonepe]: ["clientSecret"],
   [INTEGRATION_KEYS.whatsapp]: ["accessToken"],
 };
 

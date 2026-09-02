@@ -143,6 +143,20 @@ describe("createCashfreePayment", () => {
     expect(mockFetchWithTimeout).toHaveBeenCalledTimes(2);
   });
 
+  it("throws when customer mobile is missing or invalid", async () => {
+    await expect(
+      createCashfreePayment({
+        orderId: "order_123",
+        amountInRupees: 499,
+        customerMobile: "",
+      }),
+    ).rejects.toThrow(
+      "Valid 10-digit Indian mobile number is required for Cashfree checkout",
+    );
+
+    expect(mockFetchWithTimeout).not.toHaveBeenCalled();
+  });
+
   it("throws when create and recovery both fail", async () => {
     mockFetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({ message: "server error" }, 500))
