@@ -7,7 +7,7 @@ import {
 import { STOREFRONT_REVALIDATE_SECONDS } from "@/lib/cache/constants";
 import { NextRequest, NextResponse } from "next/server";
 
-export const revalidate = STOREFRONT_REVALIDATE_SECONDS;
+export const revalidate = 300;
 export const dynamic = "force-dynamic";
 
 function toApiPayload(config: ProductSizeConfig) {

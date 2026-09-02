@@ -22,7 +22,7 @@ import { toTitleCase, unslugify } from "@/lib/utils";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
-export const revalidate = STOREFRONT_REVALIDATE_SECONDS;
+export const revalidate = 300;
 
 interface CategoryPageProps {
   params: Promise<{
