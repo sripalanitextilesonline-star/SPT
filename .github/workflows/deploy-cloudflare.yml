@@ -39,7 +39,7 @@ jobs:
         run: npm run validate:wrangler
 
       - name: Run tests
-        run: npm test
+        run: npm test -- --ci --forceExit
 
       - name: Deploy to Cloudflare Workers
         env:
