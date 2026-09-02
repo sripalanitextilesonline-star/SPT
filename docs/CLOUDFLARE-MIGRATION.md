@@ -44,9 +44,14 @@ npm test
 npm run deploy   # opennextjs-cloudflare build + wrangler deploy
 ```
 
-**Required:** Wrangler logged in (`npx wrangler login`) or `CLOUDFLARE_API_TOKEN` in CI.
+**Required:** Wrangler logged in (`npx wrangler login` as `sripalanitextilesonline@gmail.com`) or `CLOUDFLARE_API_TOKEN` in CI.
 
-**Worker secrets:** Set all production env vars in Cloudflare dashboard → Workers → sri-palani-textiles → Settings → Variables and Secrets (mirror `.env.production` / Vercel env list).
+**GitHub Actions secrets (repo → Settings → Secrets):**
+- `CLOUDFLARE_API_TOKEN` — SPT account Workers + R2 deploy
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — build-time GraphQL client key
+- `CRON_SECRET` — warm/nightly cron callers
+
+**Worker secrets:** Set all production env vars in Cloudflare dashboard → Workers → sri-palani-textiles → Settings → Variables and Secrets (mirror `.env.local` production values; never commit them).
 
 ## DNS cutover (one-time)
 
