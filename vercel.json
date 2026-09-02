@@ -1,4 +1,4 @@
-﻿{
+{
   "regions": ["bom1"],
   "framework": "nextjs",
   "buildCommand": "npm run build",
