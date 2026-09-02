@@ -149,6 +149,10 @@ function validateSupabaseConfig() {
   }
 }
 
+function normalizeGitRemoteUrl(url) {
+  return url.trim().replace(/\.git$/i, "").replace(/\/$/, "");
+}
+
 function validateGitRemote() {
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -156,7 +160,7 @@ function validateGitRemote() {
       encoding: "utf8",
     }).trim();
     assert(
-      remote === identity.github.remoteUrl,
+      normalizeGitRemoteUrl(remote) === normalizeGitRemoteUrl(identity.github.remoteUrl),
       `git origin must be ${identity.github.remoteUrl} (found ${remote})`,
     );
   } catch (error) {

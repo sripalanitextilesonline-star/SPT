@@ -48,7 +48,9 @@ type TrackOrderProps = {
   searchParams?: Promise<{ token?: string }>;
 };
 
-function paymentBadgeClass(view: ReturnType<typeof resolveStorefrontOrderPaymentView>) {
+function paymentBadgeClass(
+  view: ReturnType<typeof resolveStorefrontOrderPaymentView>,
+) {
   switch (view) {
     case "confirmed":
       return "border-emerald-600 text-emerald-700";
@@ -62,7 +64,9 @@ function paymentBadgeClass(view: ReturnType<typeof resolveStorefrontOrderPayment
   }
 }
 
-function paymentAlertClass(view: ReturnType<typeof resolveStorefrontOrderPaymentView>) {
+function paymentAlertClass(
+  view: ReturnType<typeof resolveStorefrontOrderPaymentView>,
+) {
   switch (view) {
     case "confirmed":
       return "border-emerald-200 bg-emerald-50 text-emerald-900";
@@ -197,7 +201,9 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
         <Card>
           <CardHeader className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="text-lg sm:text-xl">{orderHeadline}</CardTitle>
+              <CardTitle className="text-lg sm:text-xl">
+                {orderHeadline}
+              </CardTitle>
               <Badge
                 variant="outline"
                 className={`capitalize ${paymentBadgeClass(paymentView)}`}

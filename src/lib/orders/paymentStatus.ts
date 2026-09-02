@@ -86,7 +86,12 @@ export function resolveStorefrontOrderDescription(
   }
 }
 
-const FULFILLMENT_STEPS = ["ordered", "packed", "shipped", "delivered"] as const;
+const FULFILLMENT_STEPS = [
+  "ordered",
+  "packed",
+  "shipped",
+  "delivered",
+] as const;
 
 function normalizeFulfillmentStatus(status: string | null | undefined) {
   const s = normalizeOrderStatus(status);
