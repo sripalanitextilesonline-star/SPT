@@ -5,14 +5,6 @@ import { fileURLToPath } from "node:url";
 import { buildNextSecurityHeaders } from "./security-headers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const shippingLabelPdf = path.resolve(
-  __dirname,
-  "src/lib/pdf/shipping-label-pdf.ts",
-);
-const shippingLabelPdfStub = path.resolve(
-  __dirname,
-  "src/lib/pdf/shipping-label-pdf.stub.ts",
-);
 const packingSlipPdf = path.resolve(
   __dirname,
   "src/lib/pdf/packing-slip-pdf.ts",
@@ -32,13 +24,20 @@ const nextConfig = {
       {
         source: "/:path*",
         // HSTS + Permissions-Policy + CSP enforced on the Cloudflare Workers path.
-        headers: buildNextSecurityHeaders({ enforceCsp: true }),
+        // Dev only: allow 'unsafe-eval' so Next dev bundles can hydrate locally.
+        headers: buildNextSecurityHeaders({
+          enforceCsp: true,
+          allowDevEval: process.env.NODE_ENV === "development",
+        }),
       },
     ];
   },
   images: {
     formats: ["image/avif", "image/webp"],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 320, 384, 400],
+    dangerouslyAllowSVG: true,
+    contentDispositionType: "attachment",
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     remotePatterns: [
       // Your S3 bucket when configured in .env.local
       ...(process.env.NEXT_PUBLIC_S3_BUCKET &&
@@ -70,6 +69,11 @@ const nextConfig = {
         : []),
       {
         protocol: "https",
+        hostname: "media.sripalanitextiles.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
         hostname: "source.unsplash.com",
       },
       {
@@ -91,6 +95,15 @@ const nextConfig = {
     ],
   },
   experimental: {
+    // Allow Server Actions from the public shop hosts and the Vercel
+    // production alias (used by previews / legacy callbacks).
+    serverActions: {
+      allowedOrigins: [
+        "sripalanitextiles.com",
+        "www.sripalanitextiles.com",
+        "sri-palani-textiles.vercel.app",
+      ],
+    },
     // (Next 15+) moved to top-level `serverExternalPackages`.
     // Always refetch dynamic routes (e.g. admin dashboard) when navigating
     // back to them, instead of replaying the stale client Router Cache.
@@ -98,6 +111,7 @@ const nextConfig = {
       dynamic: 0,
       static: 180,
     },
+    optimizePackageImports: ["lucide-react"],
   },
   // Keep browser-only PDF out of the Next server graph (Workers Free 3 MiB).
   serverExternalPackages: ["jspdf"],
@@ -109,8 +123,7 @@ const nextConfig = {
       ...(isServer
         ? {
             jspdf: false,
-            // Shipping-label PDF + jsPDF are browser-only; stub on SSR/Worker.
-            [shippingLabelPdf]: shippingLabelPdfStub,
+            // Packing-slip PDF + jsPDF are browser-only; stub on SSR/Worker.
             [packingSlipPdf]: packingSlipPdfStub,
           }
         : {}),
@@ -125,7 +138,11 @@ export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG?.trim() || undefined,
   project: process.env.SENTRY_PROJECT?.trim() || undefined,
   authToken: sentryAuthToken || undefined,
-  silent: !process.env.CI,
+  silent: !sentryAuthToken,
+  release: {
+    create: Boolean(sentryAuthToken),
+    finalize: Boolean(sentryAuthToken),
+  },
   // Same-origin tunnel avoids ad blockers + keeps CSP connect-src on 'self'.
   tunnelRoute: "/monitoring",
   widenClientFileUpload: Boolean(sentryAuthToken),

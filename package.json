@@ -20,6 +20,8 @@
     "validate:wrangler": "npm run identity:validate && node scripts/validate-wrangler-production.mjs wrangler.workers.new-account.jsonc",
     "pages:build": "npm run identity:validate && cross-env SKIP_ENV_VALIDATION=true opennextjs-cloudflare build --config wrangler.jsonc && node scripts/cf-pages-postbuild.mjs",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "pincode:build-shards": "node scripts/build-pincode-r2-shards.mjs",
+    "pincode:upload-overrides": "node scripts/build-pincode-r2-shards.mjs --upload-overrides",
     "test": "jest",
     "format": "prettier --ignore-path .gitignore --write \"**/*.{ts,tsx,css,scss}\"",
     "coverage": "npm test --coverage --watchAll --collectCoverageFrom='src/components'",
@@ -93,6 +95,7 @@
     "@urql/exchange-graphcache": "^6.4.1",
     "@urql/exchange-retry": "^1.2.1",
     "@urql/next": "^1.1.0",
+    "@zxing/browser": "^0.2.1",
     "aws4fetch": "^1.0.20",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
@@ -175,5 +178,11 @@
     "tsx": "^4.7.0",
     "typescript": "^5.0.0",
     "wrangler": "^4.107.1"
-  }
+  },
+  "browserslist": [
+    "chrome >= 111",
+    "firefox >= 111",
+    "safari >= 16.4",
+    "edge >= 111"
+  ]
 }

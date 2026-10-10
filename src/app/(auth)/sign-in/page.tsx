@@ -24,6 +24,13 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = searchParams ? await searchParams : {};
   const nextPath = params.from || params.next || params.redirect;
 
+  const signUpParams = new URLSearchParams();
+  if (params.email) signUpParams.set("email", params.email);
+  if (nextPath) signUpParams.set("from", nextPath);
+  const signUpHref = signUpParams.toString()
+    ? `/sign-up?${signUpParams.toString()}`
+    : "/sign-up";
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col items-center gap-3 text-center sm:items-start sm:text-left">
@@ -47,19 +54,19 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         error={params.error}
       />
 
-      <div className="flex flex-col gap-3 border-t border-primary/10 pt-4 text-sm">
+      <div className="space-y-2 border-t border-primary/10 pt-4 text-sm">
         <p className="text-muted-foreground">
           Don&apos;t have an account?{" "}
           <Link
-            href="/sign-up"
-            className="font-medium text-primary underline-offset-4 hover:underline"
+            href={signUpHref}
+            className="font-semibold text-primary underline-offset-4 hover:underline"
           >
             Create account
           </Link>
         </p>
         <Link
           href="/"
-          className="font-medium text-primary underline-offset-4 hover:underline"
+          className="inline-block font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
           ← Continue shopping
         </Link>

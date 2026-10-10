@@ -30,7 +30,7 @@ export const getURL = () => {
 const DEMO_S3_BUCKET = "spt-cdn";
 const DEMO_S3_REGION = "us-west-2";
 
-/** Public bucket for Sakthi product/collection photos (Supabase Storage). */
+/** Legacy Supabase Storage bucket name (fallback for old keys only). */
 export const SUPABASE_MEDIA_BUCKET = "media";
 
 export function supabaseStoragePublicUrl(storagePath: string) {
@@ -43,9 +43,15 @@ export function r2PublicUrl(key: string) {
   return `${base}/${key.replace(/^\//, "")}`;
 }
 
+/** Local SVG if CDN key is missing or the remote file fails to load. */
+export const STOREFRONT_IMAGE_FALLBACK = "/images/sri-palani-textiles-logo.png";
+
 /** OpenNext on Cloudflare serves `/_next/image` with attachment headers for remote URLs. */
 export function shouldBypassImageOptimization(src: string): boolean {
-  if (!src || src.startsWith("/")) return false;
+  if (!src) return false;
+  // Local SVGs (e.g. brand placeholders) skip the image optimizer.
+  if (src.startsWith("/") && /\.svg(?:$|\?)/i.test(src)) return true;
+  if (src.startsWith("/")) return false;
   if (src.startsWith("http://") || src.startsWith("https://")) return true;
   return false;
 }
@@ -61,7 +67,7 @@ import {
 
 export const keytoUrl = (key?: string) => {
   if (!key) {
-    return DEFAULT_SAREE_PLACEHOLDER;
+    return STOREFRONT_IMAGE_FALLBACK;
   }
 
   if (key.startsWith("http://") || key.startsWith("https://")) {

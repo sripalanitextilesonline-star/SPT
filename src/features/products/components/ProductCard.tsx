@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React from "react";
 import { DocumentType, gql } from "@/gql";
 import { cn } from "@/lib/utils";
 import { ProductThumbnail } from "@/features/products/components/ProductThumbnail";
@@ -7,25 +7,21 @@ import { productThumbnailImageHoverClass } from "@/features/products/productThum
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AddToCartButton } from "@/features/carts";
-import { AddToWishListButton } from "@/features/wishlists";
 import { Rating } from "@/components/ui/rating";
 import { BadgeType } from "@/lib/supabase/schema";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Icons } from "@/components/layouts/icons";
 import LowStockNotice from "./LowStockNotice";
-import ProductSizePreview from "./ProductSizePreview";
+import { ProductCardBottom } from "./ProductCardBottom";
 import { ListingProductLink } from "./ListingProductLink";
 import {
   ProductDiscountBadge,
   ProductPriceDisplay,
 } from "./ProductPriceDisplay";
+import type { ProductSizePreview as ProductSizePreviewData } from "@/lib/products/sizeConfig-shared";
 
 type CardProps = React.ComponentProps<typeof Card>;
 
@@ -34,13 +30,14 @@ export type ProductCardProps = CardProps & {
   priorityImage?: boolean;
   /** Compact “Set of N” under price when sold as pack. */
   packLabel?: string | null;
+  /** SSR / batched listing size pills — avoids per-card size-config fetch. */
+  sizePreview?: ProductSizePreviewData | null;
 };
 
 export const ProductCardFragment = gql(/* GraphQL */ `
   fragment ProductCardFragment on products {
     id
     name
-    description
     rating
     slug
     badge
@@ -66,6 +63,7 @@ export function ProductCard({
   product,
   priorityImage = false,
   packLabel = null,
+  sizePreview = null,
   ...props
 }: ProductCardProps) {
   const { id, name, slug, featuredImage, badge, stock } = product;
@@ -82,8 +80,8 @@ export function ProductCard({
           className="block"
         >
           <ProductThumbnail
-            imageKey={featuredImage.key}
-            alt={featuredImage.alt || name}
+            imageKey={featuredImage?.key}
+            alt={featuredImage?.alt || name}
             imageClassName={productThumbnailImageHoverClass}
             priority={priorityImage}
           />
@@ -113,12 +111,6 @@ export function ProductCard({
           </ListingProductLink>
         </CardTitle>
 
-        <div className="hidden md:block">
-          <CardDescription className="max-w-[240px] line-clamp-2">
-            {product.description}
-          </CardDescription>
-        </div>
-
         <ProductPriceDisplay product={product} />
         {packLabel ? (
           <p className="mt-0.5 text-xs font-medium text-muted-foreground">
@@ -126,33 +118,18 @@ export function ProductCard({
           </p>
         ) : null}
         <LowStockNotice stock={stock} />
-        <ProductSizePreview productId={id} />
 
         <div className="hidden md:block">
           <Rating value={product.rating} precision={0.5} readOnly />
         </div>
       </CardHeader>
 
-      <CardFooter className="gap-x-2 md:gap-x-5 p-0 ">
-        <Suspense
-          fallback={
-            <Button className="rounded-full p-0 h-8 w-8" disabled>
-              <Icons.basket className="h-5 w-5 md:h-4 md:w-4" />
-            </Button>
-          }
-        >
-          <AddToCartButton productId={id} stock={stock} />
-        </Suspense>
-
-        <Suspense
-          fallback={
-            <Button className="rounded-full p-3" variant="ghost" disabled>
-              <Icons.heart className={"w-4 h-4 fill-none"} />
-            </Button>
-          }
-        >
-          <AddToWishListButton productId={product.id} />
-        </Suspense>
+      <CardFooter className="relative z-10 flex-col items-stretch gap-0 p-0">
+        <ProductCardBottom
+          productId={id}
+          stock={stock}
+          sizePreview={sizePreview}
+        />
       </CardFooter>
     </Card>
   );

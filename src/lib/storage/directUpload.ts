@@ -321,17 +321,20 @@ export async function finalizeDirectUpload(params: {
   }
   buffer = Buffer.alloc(0);
 
+  const namePrefix =
+    params.purpose === "product-draft"
+      ? "product-draft"
+      : params.purpose === "velo-product"
+        ? "velo-product"
+        : "upload";
+
   let uploadedKey: string;
   try {
     uploadedKey = await uploadMediaToR2(
       processed.buffer,
       processed.contentType,
       processed.extension,
-      params.purpose === "product-draft"
-        ? "product-draft"
-        : params.purpose === "velo-product"
-          ? "velo-product"
-          : "upload",
+      namePrefix,
       { auth },
     );
   } catch (error) {

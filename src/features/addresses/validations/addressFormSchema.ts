@@ -1,12 +1,18 @@
 import { z } from "zod";
 import { INDIAN_STATES } from "../constants/indianStates";
 
+const emailField = z
+  .string()
+  .trim()
+  .min(1, "Enter your email")
+  .email("Enter a valid email address");
+
 export const addressFormSchema = z.object({
   fullName: z
     .string()
     .min(2, "Enter your full name")
     .max(120, "Name is too long"),
-  email: z.string().email("Enter a valid email address"),
+  email: emailField,
   mobile: z
     .string()
     .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number"),

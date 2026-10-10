@@ -648,7 +648,7 @@ export async function handleVeloProductsRequest(
   }
 
   const cached = await getIdempotentResponse(requestId);
-  if (cached) return cached;
+  if (cached && !veloActionSkipsIdempotency(body.action)) return cached;
 
   let response: VeloProductsResponse;
 

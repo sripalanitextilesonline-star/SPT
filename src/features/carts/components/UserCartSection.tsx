@@ -1,16 +1,20 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DocumentType } from "@/gql";
-import { FetchCartQuery } from "../queries/cart-page-queries";
-import { expectedErrorsHandler } from "@/lib/urql";
+import {
+  FetchCartQuery,
+  FetchGuestCartQuery,
+} from "../queries/cart-page-queries";
 import {
   calculateCourierCharge,
-  calculateGstAmount,
+  physicalWeightForShipping,
+  buildCheckoutMoneyTotals,
+  toGstInclusiveAmount,
 } from "@/lib/courier/calculate";
 import { fetchWithTimeout } from "@/lib/network/fetchWithTimeout";
 import { cn } from "@/lib/utils";
 import { User } from "@supabase/supabase-js";
-import { useMutation, useQuery } from "@urql/next";
+import { useQuery } from "@urql/next";
 import {
   Card,
   CardContent,
@@ -31,6 +35,7 @@ import { CartOrderSummaryFields } from "./CartOrderSummaryFields";
 import { CartItemsList, cartPageBottomSpacerClass } from "./CartItemsList";
 import { FreeShippingProgress } from "./FreeShippingProgress";
 import {
+  buildCartPincodeDefaults,
   loadCheckoutAddressDraft,
   saveCheckoutAddressDraft,
 } from "@/features/addresses/lib/checkoutAddressDraft";
@@ -44,8 +49,10 @@ import {
 } from "@/features/offers/lib/welcomeOffer";
 import { useWelcomeOfferEligibility } from "@/features/offers/hooks/useWelcomeOfferEligibility";
 import EmptyCart from "@/features/carts/components/EmptyCart";
-import { RemoveCartsMutation, updateCartsMutation } from "../query";
-import useCartStore, { CartItems } from "../useCartStore";
+import useCartStore, {
+  type OptionSelections,
+  type CartItems,
+} from "../useCartStore";
 import {
   calcLiveCartSubtotal,
   useCartLivePricing,
@@ -57,6 +64,18 @@ import {
 import { areAllOptionGroupsSelected } from "@/lib/products/sizeConfig-shared";
 import { getSaleProductPrice } from "@/lib/products/discount";
 import { isBulkOrderQuantity } from "../constants/bulkOrder";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import {
+  buildCartLineKey,
+  buildCartVariantKey,
+  normalizeCartOptionSelections,
+} from "../cart-line";
+import { shouldPurgeBareCartLine } from "../cart-options-guard";
+import { productIdsFromKey, productIdsKey } from "../lib/product-ids-key";
+import { dbCartRowsToCartItems } from "../cart-storage-sync";
+import { clearAuthCartForUser, deleteAuthCartRow } from "../cart-db-delete";
+import { markAuthCartCleared } from "../cart-cleared-marker";
+import { clearPersistedCartStorage } from "../clear-persisted-cart";
 
 export { FetchCartQuery };
 
@@ -105,8 +124,10 @@ function UserCartSection({
     query: FetchCartQuery,
     variables: {
       userId: user.id,
+      first: 200,
     },
-    requestPolicy: "network-only",
+    // Prefer SSR / cache on first paint; mutations below still force network-only.
+    requestPolicy: initialCart ? "cache-first" : "cache-and-network",
   });
 
   const cartData = data ?? initialCart ?? null;
@@ -118,11 +139,20 @@ function UserCartSection({
   const [deliveryState, setDeliveryState] = useState("");
   const [promoInput, setPromoInput] = useState("");
   const [appliedPromoCode, setAppliedPromoCode] = useState<string | null>(null);
-  const [, updateCartProduct] = useMutation(updateCartsMutation);
-  const [, removeCart] = useMutation(RemoveCartsMutation);
+  const supabase = useMemo(() => createSupabaseClient(), []);
   const localCart = useCartStore((s) => s.cart);
-  const setProductSize = useCartStore((s) => s.setProductSize);
-  const setProductSelections = useCartStore((s) => s.setProductSelections);
+  const replaceCart = useCartStore((s) => s.replaceCart);
+  const removeProductStorage = useCartStore((s) => s.removeProduct);
+  type DbCartRow = {
+    id: string;
+    product_id: string;
+    quantity: number;
+    size: string | null;
+    selections: OptionSelections | null;
+    variant_key: string | null;
+  };
+  const [dbCartRows, setDbCartRows] = useState<DbCartRow[]>([]);
+  const [dbCartLoaded, setDbCartLoaded] = useState(false);
   const [sizeConfigsByProductId, setSizeConfigsByProductId] = useState<
     Record<string, CartSizeConfig>
   >(() => initialSizeConfigs ?? {});
@@ -131,6 +161,9 @@ function UserCartSection({
     Boolean(initialSizeConfigs && prefetchedIdsKey),
   );
   const autoAppliedRef = useRef(false);
+  const loadDbCartRowsRequestId = useRef(0);
+  const cartMutationInFlightRef = useRef(false);
+  const removeChainRef = useRef(Promise.resolve());
   const welcomeCode = getWelcomeOfferCode(offerCodesConfig)?.code ?? null;
   const { eligible: welcomeEligible } = useWelcomeOfferEligibility(
     Boolean(welcomeCode),
@@ -138,27 +171,215 @@ function UserCartSection({
 
   const cart: CartEdge[] =
     cartData?.cartsCollection?.edges?.filter((edge) => edge.node.product) ?? [];
-  const cartProductIds = useMemo(
+
+  const cartProductIds = useMemo(() => {
+    const fromGraphql = cart
+      .map((edge) => edge.node.product_id)
+      .filter((productId): productId is string => Boolean(productId));
+    const fromDb = dbCartRows.map((row) => row.product_id);
+    return [...new Set([...fromGraphql, ...fromDb])];
+  }, [cart, dbCartRows]);
+
+  // After optimistic add, REST cart rows often land before GraphQL carts join
+  // catches up — hydrate product cards by id so the list is not blank while
+  // Free Shipping / Summary already show live pricing.
+  const graphqlProductIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const edge of cart) {
+      if (edge.node.product_id) ids.add(edge.node.product_id);
+    }
+    return ids;
+  }, [cart]);
+
+  const missingProductIds = useMemo(
     () =>
-      cart
-        .map((edge) => edge.node.product_id)
-        .filter((productId): productId is string => Boolean(productId)),
-    [cart],
+      [
+        ...new Set(dbCartRows.map((row) => row.product_id).filter(Boolean)),
+      ].filter((id) => !graphqlProductIds.has(id)),
+    [dbCartRows, graphqlProductIds],
   );
+
+  const [{ data: missingProductsData, fetching: missingProductsFetching }] =
+    useQuery({
+      query: FetchGuestCartQuery,
+      variables: {
+        cartItems: missingProductIds,
+        first: Math.max(missingProductIds.length, 1),
+      },
+      pause: missingProductIds.length === 0,
+      requestPolicy: "cache-and-network",
+    });
+
+  /** Live GraphQL only — do not key off stale SSR `initialCart`. */
+  const graphqlCartSignature = useMemo(
+    () =>
+      (data?.cartsCollection?.edges ?? [])
+        .map(
+          (edge) =>
+            `${edge.node.nodeId ?? edge.node.product_id}:${edge.node.quantity}`,
+        )
+        .sort()
+        .join("|"),
+    [data],
+  );
+
+  // Stale cache-first cart after "Added → View cart": force a network refresh
+  // once REST shows lines GraphQL does not.
+  const missingProductIdsKey = missingProductIds.slice().sort().join(",");
+  const refreshedForMissingKeyRef = useRef("");
+  useEffect(() => {
+    if (!missingProductIdsKey) {
+      refreshedForMissingKeyRef.current = "";
+      return;
+    }
+    if (refreshedForMissingKeyRef.current === missingProductIdsKey) return;
+    refreshedForMissingKeyRef.current = missingProductIdsKey;
+    reexecuteQuery({ requestPolicy: "network-only" });
+  }, [missingProductIdsKey, reexecuteQuery]);
+
+  const loadDbCartRows = useCallback(async () => {
+    const requestId = ++loadDbCartRowsRequestId.current;
+    try {
+      const { data, error } = await supabase
+        .from("carts")
+        .select("id,product_id,quantity,size,selections,variant_key")
+        .eq("user_id", user.id);
+      if (requestId !== loadDbCartRowsRequestId.current) return;
+      if (error) {
+        setDbCartRows([]);
+        replaceCart({});
+        setDbCartLoaded(true);
+        return;
+      }
+      const rows = (data ?? [])
+        .map((row) => ({
+          id: String(row.id),
+          product_id: String(row.product_id),
+          quantity: Number(row.quantity ?? 0),
+          size: (row.size as string | null) ?? null,
+          selections: (row.selections as OptionSelections | null) ?? null,
+          variant_key: (row.variant_key as string | null) ?? null,
+        }))
+        .filter((row) => row.quantity > 0);
+      setDbCartRows(rows);
+      replaceCart(
+        dbCartRowsToCartItems(
+          rows.map((row) => ({
+            product_id: row.product_id,
+            quantity: row.quantity,
+            size: row.size,
+            selections: row.selections,
+          })),
+        ),
+      );
+      setDbCartLoaded(true);
+    } catch {
+      if (requestId !== loadDbCartRowsRequestId.current) return;
+      setDbCartRows([]);
+      replaceCart({});
+      setDbCartLoaded(true);
+    }
+  }, [replaceCart, supabase, user.id]);
+
+  const syncDbCartRowsToStorage = useCallback(
+    (rows: DbCartRow[]) => {
+      replaceCart(
+        dbCartRowsToCartItems(
+          rows.map((row) => ({
+            product_id: row.product_id,
+            quantity: row.quantity,
+            size: row.size,
+            selections: row.selections,
+          })),
+        ),
+      );
+    },
+    [replaceCart],
+  );
+
+  useEffect(() => {
+    void loadDbCartRows();
+  }, [loadDbCartRows]);
+
+  useEffect(() => {
+    if (cartMutationInFlightRef.current) return;
+    if (!graphqlCartSignature) return;
+    void loadDbCartRows();
+    // Reload when GraphQL cart changes after server mutations — not on local optimistic edits.
+  }, [graphqlCartSignature, loadDbCartRows]);
+
   const { pricing: livePricing } = useCartLivePricing(cartProductIds);
-  const subtotal = useMemo(() => {
-    const quantities = Object.fromEntries(
-      cart.map((edge) => [
-        edge.node.product_id,
-        {
+
+  const productById = useMemo(() => {
+    const map = new Map<string, NonNullable<CartEdge["node"]["product"]>>();
+    for (const edge of cart) {
+      if (edge.node.product_id && edge.node.product) {
+        map.set(edge.node.product_id, edge.node.product);
+      }
+    }
+    for (const edge of missingProductsData?.productsCollection?.edges ?? []) {
+      const node = edge.node;
+      if (node?.id && !map.has(node.id)) {
+        map.set(node.id, node);
+      }
+    }
+    return map;
+  }, [cart, missingProductsData?.productsCollection?.edges]);
+
+  const order: CartItems = useMemo(() => {
+    const out: CartItems = {};
+    if (dbCartLoaded) {
+      for (const row of dbCartRows) {
+        const size = row.size ?? undefined;
+        const selections =
+          row.selections && Object.keys(row.selections).length > 0
+            ? row.selections
+            : undefined;
+        const lineKey = buildCartLineKey({
+          productId: row.product_id,
+          size,
+          selections,
+        });
+        out[lineKey] = {
+          productId: row.product_id,
+          quantity: row.quantity,
+          cartId: row.id,
+          ...(size ? { size } : {}),
+          ...(selections ? { selections } : {}),
+        };
+      }
+      return out;
+    }
+
+    for (const edge of cart) {
+      const productId = edge.node.product_id;
+      if (!productId) continue;
+      const fallback = Object.entries(localCart).find(
+        ([, item]) =>
+          item?.productId === productId &&
+          item?.quantity === edge.node.quantity,
+      );
+      if (fallback) {
+        const [lineKey, item] = fallback;
+        out[lineKey] = {
+          ...(item ?? {}),
+          productId,
           quantity: edge.node.quantity,
-          size: localCart[edge.node.product_id]?.size,
-          selections: localCart[edge.node.product_id]?.selections,
-        },
-      ]),
-    );
+        };
+        continue;
+      }
+      const lineKey = buildCartLineKey({ productId });
+      out[lineKey] = {
+        productId,
+        quantity: edge.node.quantity,
+      };
+    }
+    return out;
+  }, [cart, dbCartLoaded, dbCartRows, localCart]);
+
+  const subtotal = useMemo(() => {
     const liveTotal = calcLiveCartSubtotal(
-      quantities,
+      order,
       livePricing,
       sizeConfigsByProductId,
     );
@@ -166,8 +387,49 @@ function UserCartSection({
       return liveTotal;
     }
     return calcSubtotal(cart);
-  }, [cart, livePricing, localCart, sizeConfigsByProductId]);
-  const productCount = useMemo(() => calcProductCount(cart), [cart]);
+  }, [cart, livePricing, order, sizeConfigsByProductId]);
+  const productCount = useMemo(() => {
+    if (dbCartLoaded) {
+      return dbCartRows.reduce(
+        (acc, row) => (row.quantity > 0 ? acc + row.quantity : acc),
+        0,
+      );
+    }
+    return calcProductCount(cart);
+  }, [cart, dbCartLoaded, dbCartRows]);
+  const physicalCount = useMemo(() => {
+    if (dbCartLoaded) {
+      return dbCartRows.reduce((acc, row) => {
+        if (livePricing[row.product_id]?.isDigital) return acc;
+        return acc + row.quantity;
+      }, 0);
+    }
+    return cart.reduce((acc, cur) => {
+      const productId = cur.node.product?.id;
+      if (productId && livePricing[productId]?.isDigital) return acc;
+      return acc + cur.node.quantity;
+    }, 0);
+  }, [cart, dbCartLoaded, dbCartRows, livePricing]);
+  const physicalWeightKg = useMemo(() => {
+    const lines = dbCartLoaded
+      ? dbCartRows.map((row) => ({
+          productId: row.product_id,
+          quantity: row.quantity,
+        }))
+      : cart.map((cur) => ({
+          productId: cur.node.product?.id,
+          quantity: cur.node.quantity,
+        }));
+    return physicalWeightForShipping(
+      lines.map((line) => ({
+        quantity: line.quantity,
+        isDigital: line.productId
+          ? livePricing[line.productId]?.isDigital
+          : false,
+        weightKg: line.productId ? livePricing[line.productId]?.weightKg : null,
+      })),
+    );
+  }, [cart, dbCartLoaded, dbCartRows, livePricing]);
   const pincodeLookup = usePincodeLookup(deliveryPincode);
   const activeOfferCodes = useMemo(() => {
     const map = new Map<string, number>();
@@ -190,11 +452,18 @@ function UserCartSection({
     if (!courierConfig.enabled || !deliveryState) return null;
     return calculateCourierCharge({
       state: deliveryState,
-      quantity: productCount,
+      quantity: physicalCount,
+      weightKg: physicalWeightKg,
       orderAmount: discountedSubtotal,
       config: courierConfig,
     });
-  }, [courierConfig, deliveryState, discountedSubtotal, productCount]);
+  }, [
+    courierConfig,
+    deliveryState,
+    discountedSubtotal,
+    physicalCount,
+    physicalWeightKg,
+  ]);
   const courierCharge = courierBreakdown?.charge ?? 0;
   const courierEnabled = courierConfig.enabled;
   const offerCodesEnabled = activeOfferCodes.size > 0;
@@ -202,11 +471,21 @@ function UserCartSection({
     !courierEnabled ||
     (pincodeLookup.status === "ready" && Boolean(courierBreakdown));
   const hasDeliveryStateSelected = pricingReady;
-  const gstAmount = calculateGstAmount({
-    taxableAmount: discountedSubtotal + courierCharge,
+  const money = buildCheckoutMoneyTotals({
+    exclusiveMerchandise: discountedSubtotal,
+    courierCharge,
     config: courierConfig,
   });
-  const totalAmount = discountedSubtotal + courierCharge + gstAmount;
+  const gstAmount = money.gstAmount;
+  const totalAmount = money.total;
+  const displaySubtotal = toGstInclusiveAmount(subtotal, courierConfig);
+  const displayDiscountAmount = toGstInclusiveAmount(
+    discountAmount,
+    courierConfig,
+  );
+  const displayCourierBreakdown = courierBreakdown
+    ? { ...courierBreakdown, charge: money.displayCourier }
+    : null;
 
   useEffect(() => {
     const draft = loadCheckoutAddressDraft();
@@ -248,6 +527,25 @@ function UserCartSection({
           .filter(Boolean)
           .join(", ")
       : null;
+
+  const cartAddressDefaults = useMemo(
+    () =>
+      buildCartPincodeDefaults({
+        postal_code:
+          pincodeLookup.status === "ready" && pincodeLookup.result
+            ? pincodeLookup.result.pin
+            : deliveryPincode,
+        city:
+          pincodeLookup.status === "ready" && pincodeLookup.result
+            ? pincodeLookup.result.city
+            : undefined,
+        state:
+          pincodeLookup.status === "ready" && pincodeLookup.result
+            ? pincodeLookup.result.state
+            : undefined,
+      }),
+    [deliveryPincode, pincodeLookup.result, pincodeLookup.status],
+  );
 
   const onApplyPromo = () => {
     const normalized = promoInput.toUpperCase().replace(/\s+/g, "");
@@ -309,16 +607,20 @@ function UserCartSection({
     setPromoInput(claimed);
   }, [activeOfferCodes, appliedPromoCode, welcomeEligible]);
 
+  const cartProductIdsKey = productIdsKey(cartProductIds);
+
   useEffect(() => {
     let active = true;
-    const productIds = cart.map(({ node }) => node.product_id);
+    const productIds = productIdsFromKey(cartProductIdsKey);
     if (productIds.length === 0) {
       setSizeConfigsByProductId({});
       return;
     }
 
-    const currentKey = productIds.slice().sort().join(",");
-    if (skippedSizePrefetchRef.current && currentKey === prefetchedIdsKey) {
+    if (
+      skippedSizePrefetchRef.current &&
+      cartProductIdsKey === prefetchedIdsKey
+    ) {
       skippedSizePrefetchRef.current = false;
       return;
     }
@@ -326,7 +628,7 @@ function UserCartSection({
     const loadSizeConfigs = async () => {
       try {
         const res = await fetchWithTimeout(
-          `/api/products/size-config?productIds=${encodeURIComponent(productIds.join(","))}`,
+          `/api/products/size-config?productIds=${encodeURIComponent(cartProductIdsKey)}`,
         );
         if (!active) return;
         if (!res.ok) {
@@ -357,30 +659,99 @@ function UserCartSection({
     return () => {
       active = false;
     };
-  }, [cart]);
+  }, [cartProductIdsKey, prefetchedIdsKey]);
 
-  const missingSizeProductNames = useMemo(
-    () =>
-      cart
-        .filter(({ node }) => {
-          const sizeConfig = toSizeConfigFromCartPayload(
-            sizeConfigsByProductId[node.product_id],
-          );
-          if (!sizeConfig.enabled || sizeConfig.groups.length === 0) {
-            return false;
-          }
-          const item = localCart[node.product_id];
-          const selections =
-            item?.selections ??
-            (item?.size && sizeConfig.groups[0]
-              ? { [sizeConfig.groups[0].id]: item.size }
-              : {});
-          return !areAllOptionGroupsSelected(sizeConfig, selections);
-        })
-        .map(({ node }) => node.product?.name)
-        .filter((name): name is string => Boolean(name)),
-    [cart, localCart, sizeConfigsByProductId],
+  // Remove legacy bare/default lines for products that require options.
+  useEffect(() => {
+    if (dbCartRows.length === 0) return;
+    if (Object.keys(sizeConfigsByProductId).length === 0) return;
+
+    const bareRows = dbCartRows.filter((row) =>
+      shouldPurgeBareCartLine({
+        sizeConfig: sizeConfigsByProductId[row.product_id],
+        variantKey: row.variant_key,
+        selections: row.selections,
+        size: row.size,
+      }),
+    );
+    if (bareRows.length === 0) return;
+
+    let active = true;
+    void (async () => {
+      for (const row of bareRows) {
+        await supabase.from("carts").delete().eq("id", row.id);
+      }
+      if (!active) return;
+      setDbCartRows((prev) =>
+        prev.filter((row) => !bareRows.some((bare) => bare.id === row.id)),
+      );
+      reexecuteQuery({ requestPolicy: "network-only" });
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [dbCartRows, reexecuteQuery, sizeConfigsByProductId, supabase]);
+
+  const missingSizeProductNames = useMemo(() => {
+    const source =
+      dbCartRows.length > 0
+        ? dbCartRows.map((row) => ({
+            productId: row.product_id,
+            size: row.size,
+            selections: row.selections,
+            name: productById.get(row.product_id)?.name,
+          }))
+        : Object.values(order).map((item) => ({
+            productId: item.productId ?? "",
+            size: item.size ?? null,
+            selections: item.selections ?? null,
+            name: item.productId
+              ? productById.get(item.productId)?.name
+              : undefined,
+          }));
+
+    return source
+      .filter((row) => {
+        const sizeConfig = toSizeConfigFromCartPayload(
+          sizeConfigsByProductId[row.productId],
+        );
+        if (!sizeConfig.enabled || sizeConfig.groups.length === 0) {
+          return false;
+        }
+        const selections =
+          row.selections ??
+          (row.size && sizeConfig.groups[0]
+            ? { [sizeConfig.groups[0].id]: row.size }
+            : {});
+        return !areAllOptionGroupsSelected(sizeConfig, selections);
+      })
+      .map((row) => row.name)
+      .filter((name): name is string => Boolean(name));
+  }, [dbCartRows, order, productById, sizeConfigsByProductId]);
+
+  const visibleCartRows = useMemo(() => {
+    if (!dbCartLoaded) return [];
+    return dbCartRows.filter((row) => row.quantity > 0);
+  }, [dbCartLoaded, dbCartRows]);
+  const hasCartItems = visibleCartRows.length > 0;
+  const renderableCartRows = useMemo(
+    () => visibleCartRows.filter((row) => productById.has(row.product_id)),
+    [visibleCartRows, productById],
   );
+  const productsHydrating =
+    hasCartItems &&
+    renderableCartRows.length === 0 &&
+    (missingProductsFetching ||
+      (missingProductIds.length > 0 && !missingProductsData));
+
+  if (!dbCartLoaded) {
+    return <LoadingCartSection />;
+  }
+
+  if (productsHydrating) {
+    return <LoadingCartSection />;
+  }
 
   if (fetching && !cartData) {
     return <LoadingCartSection />;
@@ -395,6 +766,7 @@ function UserCartSection({
   }
 
   const addOneHandler = async (
+    cartId: string,
     productId: string,
     quantity: number,
     stock: number | null,
@@ -418,38 +790,84 @@ function UserCartSection({
       });
       return;
     }
+    loadDbCartRowsRequestId.current += 1;
+    const snapshot = dbCartRows;
+    setDbCartRows((rows) =>
+      rows.map((row) =>
+        row.id === cartId ? { ...row, quantity: row.quantity + 1 } : row,
+      ),
+    );
     setIsLoading(true);
-
-    const res = await updateCartProduct({
-      productId: productId,
-      userId: user.id,
-      newQuantity: quantity + 1,
-    });
-
-    if (res.error)
+    try {
+      const { error: updErr } = await supabase
+        .from("carts")
+        .update({ quantity: quantity + 1 })
+        .eq("id", cartId);
+      if (updErr) {
+        loadDbCartRowsRequestId.current += 1;
+        setDbCartRows(snapshot);
+        toast({
+          title: "Error",
+          description: updErr.message,
+          variant: "destructive",
+        });
+      } else {
+        reexecuteQuery({ requestPolicy: "network-only" });
+        await loadDbCartRows();
+      }
+    } catch (e) {
+      setDbCartRows(snapshot);
       toast({
         title: "Error",
-        description: expectedErrorsHandler({ error: res.error }),
+        description: e instanceof Error ? e.message : "Unexpected error",
+        variant: "destructive",
       });
+    }
 
     setIsLoading(false);
   };
 
-  const minusOneHandler = async (productId: string, quantity: number) => {
+  const minusOneHandler = async (
+    cartId: string,
+    productId: string,
+    quantity: number,
+  ) => {
     if (quantity > 1) {
+      loadDbCartRowsRequestId.current += 1;
+      const snapshot = dbCartRows;
+      setDbCartRows((rows) =>
+        rows.map((row) =>
+          row.id === cartId
+            ? { ...row, quantity: Math.max(1, row.quantity - 1) }
+            : row,
+        ),
+      );
       setIsLoading(true);
-
-      const res = await updateCartProduct({
-        productId: productId,
-        userId: user.id,
-        newQuantity: quantity - 1,
-      });
-
-      if (res.error)
+      try {
+        const { error: updErr } = await supabase
+          .from("carts")
+          .update({ quantity: quantity - 1 })
+          .eq("id", cartId);
+        if (updErr) {
+          loadDbCartRowsRequestId.current += 1;
+          setDbCartRows(snapshot);
+          toast({
+            title: "Error",
+            description: updErr.message,
+            variant: "destructive",
+          });
+        } else {
+          reexecuteQuery({ requestPolicy: "network-only" });
+          await loadDbCartRows();
+        }
+      } catch (e) {
+        setDbCartRows(snapshot);
         toast({
           title: "Error",
-          description: expectedErrorsHandler({ error: res.error }),
+          description: e instanceof Error ? e.message : "Unexpected error",
+          variant: "destructive",
         });
+      }
 
       setIsLoading(false);
     } else {
@@ -457,41 +875,226 @@ function UserCartSection({
     }
   };
 
-  const removeHandler = async (productId: string) => {
+  const removeHandler = async (row: DbCartRow) => {
+    const run = async () => {
+      if (!dbCartLoaded) {
+        toast({
+          title: "Cart still loading",
+          description: "Please wait a moment and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const lineKey = buildCartLineKey({
+        productId: row.product_id,
+        size: row.size ?? undefined,
+        selections:
+          row.selections && Object.keys(row.selections).length > 0
+            ? row.selections
+            : undefined,
+      });
+      cartMutationInFlightRef.current = true;
+      loadDbCartRowsRequestId.current += 1;
+      let optimisticRows: DbCartRow[] = [];
+      setDbCartRows((prev) => {
+        optimisticRows = prev.filter((entry) => entry.id !== row.id);
+        return optimisticRows;
+      });
+      removeProductStorage(lineKey);
+      setIsLoading(true);
+      try {
+        const { deletedIds, error: delErr } = await deleteAuthCartRow({
+          supabase,
+          userId: user.id,
+          row,
+        });
+        if (delErr) {
+          throw delErr;
+        }
+        if (deletedIds.length === 0) {
+          throw new Error("Could not remove item from cart. Please try again.");
+        }
+
+        if (optimisticRows.length === 0) {
+          markAuthCartCleared(user.id);
+          const { error: clearErr } = await clearAuthCartForUser({
+            supabase,
+            userId: user.id,
+          });
+          if (clearErr) {
+            throw clearErr;
+          }
+          setDbCartRows([]);
+          replaceCart({});
+          clearPersistedCartStorage();
+          replaceCart({});
+        } else {
+          setDbCartRows(optimisticRows);
+          syncDbCartRowsToStorage(optimisticRows);
+        }
+
+        toast({ title: "Removed a Product." });
+        reexecuteQuery({ requestPolicy: "network-only" });
+        await loadDbCartRows();
+      } catch (e) {
+        await loadDbCartRows();
+        toast({
+          title: "Error",
+          description: e instanceof Error ? e.message : "Unexpected error",
+          variant: "destructive",
+        });
+      } finally {
+        cartMutationInFlightRef.current = false;
+        setIsLoading(false);
+      }
+    };
+
+    const next = removeChainRef.current.then(run, run);
+    removeChainRef.current = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    await next;
+  };
+
+  const updateVariantFromSelections = async (
+    cartId: string,
+    productId: string,
+    quantity: number,
+    nextSelections: OptionSelections,
+  ) => {
     setIsLoading(true);
+    try {
+      const normalizedSelections =
+        normalizeCartOptionSelections(nextSelections);
+      const hasSelections = Object.keys(normalizedSelections).length > 0;
+      const selections = hasSelections ? normalizedSelections : null;
+      // Keep legacy size column in sync for older checkout/readers.
+      const legacySize = selections
+        ? Object.values(selections)[0] ?? null
+        : null;
 
-    const res = await removeCart({ productId, userId: user.id });
+      const variantKey = buildCartVariantKey({
+        productId,
+        selections: selections ?? undefined,
+      });
 
-    if (res.error) {
+      const { data: target } = await supabase
+        .from("carts")
+        .select("id,quantity")
+        .eq("user_id", user.id)
+        .eq("product_id", productId)
+        .eq("variant_key", variantKey)
+        .maybeSingle();
+
+      if (target && target.id && target.id !== cartId) {
+        const { error: updTargetErr } = await supabase
+          .from("carts")
+          .update({
+            quantity: target.quantity + quantity,
+            size: legacySize,
+            selections,
+            variant_key: variantKey,
+          })
+          .eq("id", target.id);
+        if (updTargetErr) throw updTargetErr;
+
+        const { error: delErr } = await supabase
+          .from("carts")
+          .delete()
+          .eq("id", cartId);
+        if (delErr) throw delErr;
+      } else {
+        const { error: updErr } = await supabase
+          .from("carts")
+          .update({
+            size: legacySize,
+            selections,
+            variant_key: variantKey,
+          })
+          .eq("id", cartId);
+        if (updErr) throw updErr;
+      }
+
+      reexecuteQuery({ requestPolicy: "network-only" });
+      void loadDbCartRows();
+    } catch (e) {
       toast({
         title: "Error",
-        description: expectedErrorsHandler({ error: res.error }),
+        description: e instanceof Error ? e.message : "Unexpected error",
+        variant: "destructive",
       });
-    } else {
-      toast({ title: "Removed a Product." });
-      reexecuteQuery({ requestPolicy: "network-only" });
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
-  const createCartObject = (
-    data: DocumentType<typeof FetchCartQuery>,
-  ): CartItems => {
-    const cart: CartItems = {};
-    data.cartsCollection.edges.forEach((item) => {
-      const product = item.node.product;
-      if (!product) return;
-      cart[product.id] = {
-        quantity: item.node.quantity,
-        size: localCart[product.id]?.size,
-        selections: localCart[product.id]?.selections,
-      };
-    });
-    return cart;
-  };
+  const updateVariantFromSize = async (
+    cartId: string,
+    productId: string,
+    quantity: number,
+    size: string,
+  ) => {
+    setIsLoading(true);
+    try {
+      const normalizedSize = String(size ?? "")
+        .trim()
+        .toUpperCase();
+      const variantKey = buildCartVariantKey({
+        productId,
+        size: normalizedSize,
+      });
 
-  const order = createCartObject(data);
+      const { data: target } = await supabase
+        .from("carts")
+        .select("id,quantity")
+        .eq("user_id", user.id)
+        .eq("product_id", productId)
+        .eq("variant_key", variantKey)
+        .maybeSingle();
+
+      if (target && target.id && target.id !== cartId) {
+        const { error: updTargetErr } = await supabase
+          .from("carts")
+          .update({
+            quantity: target.quantity + quantity,
+            size: normalizedSize,
+            selections: null,
+            variant_key: variantKey,
+          })
+          .eq("id", target.id);
+        if (updTargetErr) throw updTargetErr;
+
+        const { error: delErr } = await supabase
+          .from("carts")
+          .delete()
+          .eq("id", cartId);
+        if (delErr) throw delErr;
+      } else {
+        const { error: updErr } = await supabase
+          .from("carts")
+          .update({
+            size: normalizedSize,
+            selections: null,
+            variant_key: variantKey,
+          })
+          .eq("id", cartId);
+        if (updErr) throw updErr;
+      }
+
+      reexecuteQuery({ requestPolicy: "network-only" });
+      void loadDbCartRows();
+    } catch (e) {
+      toast({
+        title: "Error",
+        description: e instanceof Error ? e.message : "Unexpected error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const summaryFields = {
     productCount,
@@ -509,11 +1112,12 @@ function UserCartSection({
     appliedPromoCode,
     promoPercentage,
     onRemovePromo,
-    subtotal,
-    discountAmount,
-    discountedSubtotal,
-    courierBreakdown,
+    subtotal: displaySubtotal,
+    discountAmount: displayDiscountAmount,
+    discountedSubtotal: money.displayMerchandise,
+    courierBreakdown: displayCourierBreakdown,
     gstEnabled: courierConfig.gstEnabled,
+    gstPercentage: courierConfig.gstPercentage,
     gstAmount,
     totalAmount,
   };
@@ -525,14 +1129,16 @@ function UserCartSection({
       order={order}
       promoCode={appliedPromoCode}
       missingSizeProductNames={missingSizeProductNames}
+      sizeConfigsByProductId={sizeConfigsByProductId}
       requireDeliveryStateSelection={courierEnabled}
       hasDeliveryStateSelected={!courierEnabled || hasDeliveryStateSelected}
+      cartAddressDefaults={cartAddressDefaults}
     />
   );
 
   return (
     <>
-      {data.cartsCollection && cart.length > 0 ? (
+      {renderableCartRows.length > 0 ? (
         <section
           aria-label="Cart Section"
           className={cn(
@@ -546,79 +1152,105 @@ function UserCartSection({
           />
 
           <CartItemsList>
-            {cart.map(({ node }) =>
-              (() => {
-                const sizeConfig = toSizeConfigFromCartPayload(
-                  sizeConfigsByProductId[node.product_id],
-                );
-                const optionGroups = sizeConfig.groups
-                  .filter((group) =>
-                    group.options.some((option) => Number(option.qty ?? 0) > 0),
-                  )
-                  .map((group) => ({
-                    id: group.id,
-                    name: group.name,
-                    options: group.options
-                      .filter((option) => Number(option.qty ?? 0) > 0)
-                      .map((option) => {
-                        const normalized = String(
-                          option.value ?? option.size ?? "",
-                        )
-                          .trim()
-                          .toUpperCase();
-                        return {
-                          value: normalized,
-                          label: normalized || `${option.qty}`,
-                        };
-                      })
-                      .filter((option) => option.value.length > 0),
-                  }));
-                const sizeRequired = optionGroups.length > 0;
-                const item = localCart[node.product_id];
-                const selections =
-                  item?.selections ??
-                  (item?.size && optionGroups[0]
-                    ? { [optionGroups[0].id]: item.size }
-                    : {});
-
-                return (
-                  <CartItemCard
-                    key={node.product_id}
-                    id={node.product_id}
-                    product={withLiveLinePricing(
-                      node.product!,
-                      livePricing[node.product_id],
-                      sizeConfig,
-                      item?.size,
-                      selections,
-                    )}
-                    quantity={node.quantity}
-                    selectedSize={item?.size}
-                    selections={selections}
-                    sizeRequired={sizeRequired}
-                    optionGroups={optionGroups}
-                    onSelectionsChange={(next) =>
-                      setProductSelections(node.product_id, next)
-                    }
-                    onSizeChange={(size) =>
-                      setProductSize(node.product_id, size)
-                    }
-                    addOneHandler={() =>
-                      addOneHandler(
-                        node.product_id,
-                        node.quantity,
-                        node.product?.stock ?? null,
+            {renderableCartRows.map((row) => {
+              const product = productById.get(row.product_id);
+              if (!product) return null;
+              const sizeConfig = toSizeConfigFromCartPayload(
+                sizeConfigsByProductId[row.product_id],
+              );
+              const optionGroups = sizeConfig.groups
+                .filter((group) =>
+                  group.options.some((option) => Number(option.qty ?? 0) > 0),
+                )
+                .map((group) => ({
+                  id: group.id,
+                  name: group.name,
+                  options: group.options
+                    .filter((option) => Number(option.qty ?? 0) > 0)
+                    .map((option) => {
+                      const normalized = String(
+                        option.value ?? option.size ?? "",
                       )
-                    }
-                    minusOneHandler={() =>
-                      minusOneHandler(node.product_id, node.quantity)
-                    }
-                    removeHandler={() => removeHandler(node.product_id)}
-                    disabled={isLoading}
-                  />
-                );
-              })(),
-            )}
+                        .trim()
+                        .toUpperCase();
+                      return {
+                        value: normalized,
+                        label:
+                          option.price != null &&
+                          Number.isFinite(Number(option.price))
+                            ? `${normalized || option.qty} · ₹${Number(option.price)}`
+                            : normalized || `${option.qty}`,
+                      };
+                    })
+                    .filter((option) => option.value.length > 0),
+                }));
+              const sizeRequired = optionGroups.length > 0;
+              const cartId = row.id;
+              const size = row.size ?? undefined;
+              const rowSelections =
+                row.selections && Object.keys(row.selections).length > 0
+                  ? row.selections
+                  : undefined;
+              const lineKey = buildCartLineKey({
+                productId: row.product_id,
+                size,
+                selections: rowSelections,
+              });
+              const item = order[lineKey];
+              const selections =
+                item?.selections ??
+                rowSelections ??
+                (item?.size && optionGroups[0]
+                  ? { [optionGroups[0].id]: item.size }
+                  : {});
+
+              return (
+                <CartItemCard
+                  key={row.id}
+                  product={withLiveLinePricing(
+                    product,
+                    livePricing[row.product_id],
+                    sizeConfig,
+                    item?.size ?? size,
+                    selections,
+                  )}
+                  quantity={row.quantity}
+                  selectedSize={item?.size ?? size}
+                  selections={selections}
+                  sizeRequired={sizeRequired}
+                  optionGroups={optionGroups}
+                  onSelectionsChange={(next) =>
+                    updateVariantFromSelections(
+                      cartId,
+                      row.product_id,
+                      row.quantity,
+                      next,
+                    )
+                  }
+                  onSizeChange={(nextSize) =>
+                    updateVariantFromSize(
+                      cartId,
+                      row.product_id,
+                      row.quantity,
+                      nextSize,
+                    )
+                  }
+                  addOneHandler={() =>
+                    addOneHandler(
+                      cartId,
+                      row.product_id,
+                      row.quantity,
+                      product.stock ?? null,
+                    )
+                  }
+                  minusOneHandler={() =>
+                    minusOneHandler(cartId, row.product_id, row.quantity)
+                  }
+                  removeHandler={() => removeHandler(row)}
+                  disabled={isLoading || !dbCartLoaded}
+                />
+              );
+            })}
           </CartItemsList>
 
           <Card className="col-span-12 w-full px-3 md:col-span-3">

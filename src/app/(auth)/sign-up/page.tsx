@@ -36,19 +36,19 @@ export default async function SignUpPage({ searchParams }: SignUpPageProps) {
 
       <SignupForm initialEmail={params.email} from={params.from} />
 
-      <div className="flex flex-col gap-3 border-t border-primary/10 pt-4 text-sm">
+      <div className="space-y-2 border-t border-primary/10 pt-4 text-sm">
         <p className="text-muted-foreground">
           Already have an account?{" "}
           <Link
             href="/sign-in"
-            className="font-medium text-primary underline-offset-4 hover:underline"
+            className="font-semibold text-primary underline-offset-4 hover:underline"
           >
             Sign in
           </Link>
         </p>
         <Link
           href="/"
-          className="font-medium text-primary underline-offset-4 hover:underline"
+          className="inline-block font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
           ← Continue shopping
         </Link>

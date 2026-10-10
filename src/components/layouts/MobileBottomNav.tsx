@@ -6,10 +6,12 @@ import { usePathname } from "next/navigation";
 import { Home, Heart, Search, ShoppingCart, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCartCount } from "@/features/carts/hooks/useCartCount";
+import { useCartAddedPulse } from "@/features/carts/hooks/useCartAddedPulse";
 import useWishlistStore from "@/features/wishlists/useWishlistStore";
 import { useMobileSearch } from "@/components/layouts/MobileSearchContext";
 import { useRobustNavigate } from "@/hooks/useRobustNavigate";
 import { useAuth } from "@/providers/AuthProvider";
+import { useCheckoutChrome } from "@/providers/CheckoutChromeProvider";
 
 function NavBadge({ count }: { count: number }) {
   return (
@@ -36,12 +38,16 @@ type NavItem = {
 export function MobileBottomNav() {
   const pathname = usePathname();
   const cartCount = useCartCount();
+  const cartPulse = useCartAddedPulse();
   const wishlist = useWishlistStore((s) => s.wishlist);
   const wishCount = Object.keys(wishlist).length;
   const { onNavigateClick } = useRobustNavigate();
   const { isOpen: isSearchOpen, openSearch } = useMobileSearch();
   const { user } = useAuth();
+  const { hideStoreChrome } = useCheckoutChrome();
   const accountHref = user ? "/orders" : "/sign-in";
+
+  if (hideStoreChrome) return null;
 
   const itemClass = (active: boolean) =>
     cn(
@@ -92,7 +98,12 @@ export function MobileBottomNav() {
       label: "Cart",
       active: pathname === "/cart",
       icon: (
-        <span className="relative inline-flex">
+        <span
+          className={cn(
+            "relative inline-flex transition-transform duration-300",
+            cartPulse && "scale-125",
+          )}
+        >
           <ShoppingCart className="h-5 w-5 shrink-0" strokeWidth={1.75} />
           <NavBadge count={cartCount} />
         </span>
@@ -102,8 +113,7 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-[220] isolate border-t border-zinc-700 bg-zinc-900 text-white shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
-      style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))" }}
+      className="md:hidden fixed inset-x-0 bottom-0 z-[220] isolate border-t border-zinc-700 bg-zinc-900 pb-[env(safe-area-inset-bottom,0px)] text-white shadow-[0_-4px_24px_rgba(0,0,0,0.35)]"
       aria-label="Mobile navigation"
     >
       <div className="mx-auto flex h-14 max-w-lg items-stretch justify-around">

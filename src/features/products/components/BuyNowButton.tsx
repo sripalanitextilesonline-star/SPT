@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/use-toast";
@@ -8,6 +8,10 @@ import { CheckoutAddressDialog } from "@/features/addresses";
 import type { SavedShippingAddress } from "@/features/addresses";
 import { clearCheckoutAddressDraft } from "@/features/addresses/lib/checkoutAddressDraft";
 import { startCheckout } from "@/features/checkout/startCheckout";
+import {
+  preconnectRazorpayCheckout,
+  preloadRazorpayCheckoutScript,
+} from "@/lib/payments/razorpay-checkout-client";
 import { useCheckoutProgress } from "@/features/checkout/useCheckoutProgress";
 import { useAuth } from "@/providers/AuthProvider";
 import { useStockControlConfig } from "@/providers/StockControlProvider";
@@ -30,6 +34,11 @@ function BuyNowButton({ productId, quantity = 1, stock }: BuyNowButtonProps) {
   const { progress, isLocked, beginProgress, clearProgress, overlay } =
     useCheckoutProgress();
 
+  useEffect(() => {
+    preconnectRazorpayCheckout();
+    preloadRazorpayCheckoutScript();
+  }, []);
+
   const accountDefaults = useMemo(
     () =>
       user?.email
@@ -44,8 +53,10 @@ function BuyNowButton({ productId, quantity = 1, stock }: BuyNowButtonProps) {
 
   const handleCheckoutComplete = async (shipping: SavedShippingAddress) => {
     setOpen(false);
-    await new Promise((r) => setTimeout(r, 80));
     setIsProcessing(true);
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 500);
+    });
     try {
       await startCheckout({
         order: { [productId]: { quantity } },
@@ -96,7 +107,6 @@ function BuyNowButton({ productId, quantity = 1, stock }: BuyNowButtonProps) {
       <CheckoutAddressDialog
         open={open}
         onOpenChange={(next) => {
-          if (isLocked && !next) return;
           setOpen(next);
         }}
         onComplete={handleCheckoutComplete}

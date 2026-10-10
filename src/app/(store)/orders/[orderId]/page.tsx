@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Circle,
+  Download,
   ExternalLink,
   Package,
   Truck,
@@ -40,13 +41,20 @@ import {
   products,
 } from "@/lib/supabase/schema";
 import { formatDate, formatPrice, keytoUrl } from "@/lib/utils";
+import { displayInternalOrderRef } from "@/lib/orders/internal-order-ref";
+import {
+  resolveCourierChargesConfig,
+  toGstInclusiveAmount,
+} from "@/lib/integrations/settings";
 import { eq } from "drizzle-orm";
-import Image from "next/image";
+import { StorefrontImage } from "@/components/media/StorefrontImage";
 
 type TrackOrderProps = {
   params: Promise<{ orderId: string }>;
   searchParams?: Promise<{ token?: string }>;
 };
+
+export const dynamic = "force-dynamic";
 
 function paymentBadgeClass(
   view: ReturnType<typeof resolveStorefrontOrderPaymentView>,
@@ -100,6 +108,7 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
   const orderRows = await db
     .select({
       id: orders.id,
+      internalRef: orders.internal_ref,
       user_id: orders.user_id,
       createdAt: orders.createdAt,
       amount: orders.amount,
@@ -124,6 +133,8 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
 
   const order = orderRows[0];
   if (!order) return notFound();
+
+  const courierConfig = await resolveCourierChargesConfig();
 
   const allowed = await canViewOrder(
     {
@@ -155,6 +166,8 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
       productNameSnapshot: orderLines.productNameSnapshot,
       productSlugSnapshot: orderLines.productSlugSnapshot,
       productImageKeySnapshot: orderLines.productImageKeySnapshot,
+      isDigitalSnapshot: orderLines.isDigitalSnapshot,
+      digitalFileNameSnapshot: orderLines.digitalFileNameSnapshot,
       imageKey: medias.key,
       imageAlt: medias.alt,
     })
@@ -163,6 +176,7 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
     .leftJoin(medias, eq(products.featuredImageId, medias.id))
     .where(eq(orderLines.orderId, orderId));
 
+  const internalRefLabel = displayInternalOrderRef(order.internalRef);
   const paymentView = resolveStorefrontOrderPaymentView({
     payment_status: order.paymentStatus,
     order_status: order.orderStatus,
@@ -221,6 +235,14 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
               )}
               <p>{orderDescription}</p>
             </div>
+            {internalRefLabel ? (
+              <p className="text-base">
+                <span className="text-muted-foreground">Order No:</span>{" "}
+                <span className="font-semibold tabular-nums text-foreground">
+                  {internalRefLabel}
+                </span>
+              </p>
+            ) : null}
             <p className="text-sm text-muted-foreground">
               Order ID:{" "}
               <span className="font-medium text-foreground">#{order.id}</span>
@@ -305,7 +327,12 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
                     Track shipment
                   </a>
                 </Button>
-              ) : null}
+              ) : (
+                <p className="text-muted-foreground">
+                  Tracking link will appear here once a tracking number is
+                  available.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : null}
@@ -345,19 +372,13 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
                     className="flex items-center gap-3 rounded-md border p-2.5"
                   >
                     <div className="relative h-14 w-14 overflow-hidden rounded-md border bg-muted">
-                      {imageKey ? (
-                        <Image
-                          src={keytoUrl(imageKey)}
-                          alt={imageAlt}
-                          fill
-                          className="object-cover"
-                          sizes="56px"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
-                          No image
-                        </div>
-                      )}
+                      <StorefrontImage
+                        src={keytoUrl(imageKey ?? undefined)}
+                        alt={imageAlt}
+                        fill
+                        className="object-cover"
+                        sizes="56px"
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       {productSlug ? (
@@ -374,8 +395,34 @@ async function TrackOrderPage({ params, searchParams }: TrackOrderProps) {
                       )}
                       <p className="text-xs text-muted-foreground">
                         Qty: {line.quantity} •{" "}
-                        {formatPrice(Number(line.unitPrice))}
+                        {formatPrice(
+                          toGstInclusiveAmount(
+                            Number(line.unitPrice),
+                            courierConfig,
+                          ),
+                        )}
                       </p>
+                      {line.isDigitalSnapshot ? (
+                        order.paymentStatus === "paid" ? (
+                          <Button asChild size="sm" className="mt-2">
+                            <a
+                              href={`/api/orders/${order.id}/digital-download?lineId=${encodeURIComponent(line.id)}${
+                                resolvedSearchParams?.token
+                                  ? `&token=${encodeURIComponent(resolvedSearchParams.token)}`
+                                  : ""
+                              }`}
+                            >
+                              <Download className="mr-2 h-4 w-4" />
+                              Download{" "}
+                              {line.digitalFileNameSnapshot || "software"}
+                            </a>
+                          </Button>
+                        ) : (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Download appears after payment is confirmed.
+                          </p>
+                        )
+                      ) : null}
                     </div>
                   </div>
                 );

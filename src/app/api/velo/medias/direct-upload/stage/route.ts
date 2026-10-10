@@ -17,7 +17,7 @@ export async function OPTIONS(request: NextRequest) {
 
 /**
  * Fallback when uploadMode is "worker" (proxy token unavailable).
- * Prefer init → PUT media.sripalanitextiles.com with uploadToken.
+ * Prefer init → PUT media proxy with uploadToken.
  */
 export async function POST(request: NextRequest) {
   try {

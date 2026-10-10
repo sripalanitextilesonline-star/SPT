@@ -1,5 +1,6 @@
 import db from "@/lib/supabase/db";
 import { carts, orders, type SelectOrders } from "@/lib/supabase/schema";
+import { notifyOrderConfirmationEmail } from "@/lib/email/order-confirmation-email";
 import { notifyVeloOrderPushSafe } from "@/lib/integrations/velo-order-push";
 import {
   notifyOrderWhatsAppTargets,
@@ -7,8 +8,20 @@ import {
 } from "@/lib/integrations/whatsapp";
 import { fetchPhonePePaymentStatus } from "@/lib/payments/phonepe";
 import { fetchCashfreeOrderStatus } from "@/lib/payments/cashfree";
+import {
+  fetchRazorpayOrder,
+  fetchRazorpayPayment,
+  resolveBestRazorpayPaymentId,
+} from "@/lib/payments/razorpay";
+import { paiseToRupees } from "@/lib/payments/razorpay-standards";
 import { fulfillPaidOrderInventory } from "@/lib/orders/inventory-fulfillment";
-import { mergePaymentMeta, readPaymentMeta } from "@/lib/orders/payment-meta";
+import { assignInternalOrderRefIfNeeded } from "@/lib/orders/assign-internal-order-ref";
+import { appendCheckoutTelemetryEvent } from "@/lib/checkout/checkout-telemetry";
+import {
+  isSamePaymentMeta,
+  mergePaymentMeta,
+  readPaymentMeta,
+} from "@/lib/orders/payment-meta";
 import { detectPaidAmountMismatch } from "@/lib/payments/amount-check";
 import {
   canReleaseOrphanUnpaidHold,
@@ -25,9 +38,11 @@ type SyncInput =
 /**
  * All post-payment side effects, each individually idempotent (guarded by
  * flags on the order row / payment_meta):
+ * - Internal ref (SPT…)    -> orders.internal_ref
  * - WhatsApp confirmations  -> whatsapp_notified / whatsapp_seller_notified
  * - Cart clear              -> plain DELETE, naturally idempotent
  * - Inventory fulfillment   -> payment_meta.inventoryFulfilled
+ * - Order confirmation email -> payment_meta.emailNotified
  * - Velo push               -> payment_meta.veloPushNotified
  *
  * Every effect is attempted even if an earlier one fails; if anything failed
@@ -37,6 +52,13 @@ type SyncInput =
  */
 async function runPaidOrderSideEffects(order: SelectOrders) {
   const failures: string[] = [];
+
+  try {
+    await assignInternalOrderRefIfNeeded(order.id);
+  } catch (error) {
+    console.error("[payments] internal ref assign failed:", error);
+    failures.push("internal_ref");
+  }
 
   try {
     const wa = await notifyOrderWhatsAppTargets(order);
@@ -78,6 +100,16 @@ async function runPaidOrderSideEffects(order: SelectOrders) {
   } catch (error) {
     console.error("[payments] inventory fulfillment failed:", error);
     failures.push("inventory");
+  }
+
+  try {
+    const emailResult = await notifyOrderConfirmationEmail(order);
+    if (emailResult.skipped === "error") {
+      throw new Error(emailResult.error ?? "Order confirmation email failed");
+    }
+  } catch (error) {
+    console.error("[payments] order confirmation email failed:", error);
+    failures.push("email");
   }
 
   try {
@@ -379,6 +411,207 @@ export async function syncCashfreeOrderPayment(
   return {
     orderId: updated.id,
     state,
+    isPaid,
+  };
+}
+
+export async function syncRazorpayOrderPayment(
+  input: {
+    orderId: string;
+    razorpayOrderId?: string | null;
+    razorpayPaymentId?: string | null;
+  },
+  options?: { runSideEffects?: boolean; treatAsPaid?: boolean },
+) {
+  const runSideEffects = options?.runSideEffects !== false;
+  const currentOrder = await db.query.orders.findFirst({
+    where: eq(orders.id, input.orderId),
+  });
+
+  if (!currentOrder) {
+    throw new Error("Order not found for Razorpay payment sync");
+  }
+
+  if (currentOrder.payment_status === "paid") {
+    if (runSideEffects) {
+      await ensurePaidOrderSideEffects(currentOrder);
+    }
+    return {
+      orderId: currentOrder.id,
+      state: "paid",
+      isPaid: true,
+      alreadyPaid: true as const,
+    };
+  }
+
+  const existingMeta = readPaymentMeta(currentOrder.payment_meta);
+  const razorpayOrderId = String(
+    input.razorpayOrderId ??
+      existingMeta.razorpayOrderId ??
+      currentOrder.payment_reference ??
+      "",
+  ).trim();
+
+  if (!razorpayOrderId) {
+    throw new Error("Razorpay order id missing for payment sync");
+  }
+
+  const razorpayPaymentId = String(
+    input.razorpayPaymentId ?? existingMeta.razorpayPaymentId ?? "",
+  ).trim();
+
+  let resolvedPaymentId = razorpayPaymentId;
+  if (!resolvedPaymentId) {
+    resolvedPaymentId =
+      (await resolveBestRazorpayPaymentId(razorpayOrderId)) ?? "";
+  }
+
+  const rzpOrder = await fetchRazorpayOrder(razorpayOrderId);
+  const rzpPayment = resolvedPaymentId
+    ? await fetchRazorpayPayment(resolvedPaymentId)
+    : null;
+
+  const notes = (rzpOrder.notes ?? {}) as Record<string, string>;
+  const notesShopId = String(notes.shop_order_id ?? "").trim();
+  if (notesShopId && notesShopId !== currentOrder.id) {
+    throw new Error("Razorpay order does not match this shop order.");
+  }
+
+  if (rzpPayment?.order_id && String(rzpPayment.order_id) !== razorpayOrderId) {
+    throw new Error("Razorpay payment does not belong to this order.");
+  }
+
+  const gatewayAmountRupees = paiseToRupees(
+    Number(rzpPayment?.amount ?? rzpOrder.amount ?? Number.NaN),
+  );
+
+  const orderStatus = String(rzpOrder.status ?? "").toLowerCase();
+  const paymentStatus = String(rzpPayment?.status ?? "").toLowerCase();
+  let isPaid =
+    Boolean(options?.treatAsPaid) ||
+    orderStatus === "paid" ||
+    paymentStatus === "captured";
+  const isFailed = paymentStatus === "failed";
+  const razorpayFailureReason = isFailed
+    ? String(
+        rzpPayment?.error_description ?? rzpPayment?.error?.description ?? "",
+      ).trim() || null
+    : null;
+  const razorpayFailureCode = isFailed
+    ? String(rzpPayment?.error_code ?? rzpPayment?.error?.code ?? "").trim() ||
+      null
+    : null;
+
+  const amountCheck = detectPaidAmountMismatch(
+    currentOrder.amount,
+    Number.isFinite(gatewayAmountRupees) ? gatewayAmountRupees : null,
+  );
+  const amountMismatch = isPaid && amountCheck.mismatch;
+  if (amountMismatch) {
+    console.error(
+      `[payments] Razorpay amount mismatch for order ${currentOrder.id}: expected ${amountCheck.expected}, gateway reported ${amountCheck.actual}. Holding order for manual review.`,
+    );
+    isPaid = false;
+
+    if (!existingMeta.amountMismatch) {
+      await sendSellerOpsAlert(
+        `Payment amount mismatch (Razorpay)\nOrder: #${currentOrder.id}\nExpected: INR ${amountCheck.expected}\nGateway reported: INR ${amountCheck.actual ?? "missing"}\nOrder is HELD as unpaid — review it in admin before shipping.`,
+      );
+    }
+  }
+
+  const nextFields = {
+    order_status: isPaid ? "PREPARING" : isFailed ? "canceled" : "pending",
+    payment_status: isPaid ? ("paid" as const) : ("unpaid" as const),
+    payment_method: "razorpay",
+    payment_provider: "razorpay",
+    payment_reference: razorpayOrderId,
+  };
+  const nextMeta = mergePaymentMeta(existingMeta, {
+    razorpayOrderId,
+    razorpayPaymentId: resolvedPaymentId || null,
+    razorpayOrderStatus: orderStatus,
+    razorpayPaymentStatus: paymentStatus || null,
+    razorpayMethod: rzpPayment?.method ?? null,
+    ...(razorpayFailureReason
+      ? { razorpayFailureReason, razorpayFailureCode }
+      : {}),
+    ...(amountMismatch && !existingMeta.amountMismatch
+      ? {
+          amountMismatch: {
+            expected: amountCheck.expected,
+            gatewayReported: amountCheck.actual,
+            detectedAt: new Date().toISOString(),
+          },
+        }
+      : {}),
+  });
+
+  // Recovery polls re-check abandoned orders repeatedly; skip the write (and
+  // repeat failure telemetry) when Razorpay reports nothing new. Legacy
+  // string-encoded payment_meta still gets one normalizing write.
+  const unchanged =
+    !isPaid &&
+    currentOrder.payment_meta !== null &&
+    typeof currentOrder.payment_meta === "object" &&
+    currentOrder.order_status === nextFields.order_status &&
+    currentOrder.payment_status === nextFields.payment_status &&
+    currentOrder.payment_method === nextFields.payment_method &&
+    currentOrder.payment_provider === nextFields.payment_provider &&
+    currentOrder.payment_reference === nextFields.payment_reference &&
+    isSamePaymentMeta(existingMeta, nextMeta);
+
+  if (unchanged) {
+    await maybeReleaseExpiredReservation(currentOrder.id);
+    return {
+      orderId: currentOrder.id,
+      state: orderStatus || paymentStatus,
+      isPaid: false,
+    };
+  }
+
+  const [updated] = await db
+    .update(orders)
+    .set({ ...nextFields, payment_meta: nextMeta })
+    .where(
+      and(eq(orders.id, currentOrder.id), ne(orders.payment_status, "paid")),
+    )
+    .returning();
+
+  if (!updated) {
+    return {
+      orderId: currentOrder.id,
+      state: orderStatus,
+      isPaid: true,
+      alreadyPaid: true as const,
+    };
+  }
+
+  if (isPaid) {
+    if (runSideEffects) {
+      await runPaidOrderSideEffects(updated);
+    } else {
+      void runPaidOrderSideEffects(updated).catch((error) => {
+        console.error("[payments] Razorpay side effects deferred:", error);
+      });
+    }
+  } else if (isFailed) {
+    await appendCheckoutTelemetryEvent({
+      orderId: updated.id,
+      type: "razorpay_webhook_failed",
+      reason: razorpayFailureReason,
+      source: "server",
+    }).catch((error) => {
+      console.warn("[payments] checkout telemetry failed:", error);
+    });
+    await maybeReleaseUnpaidReservation(updated.id, "payment_failed");
+  } else {
+    await maybeReleaseExpiredReservation(updated.id);
+  }
+
+  return {
+    orderId: updated.id,
+    state: orderStatus || paymentStatus,
     isPaid,
   };
 }

@@ -1,31 +1,32 @@
 import { sanitizeTrackingNumber } from "./tracking-sanitizer";
 
 describe("sanitizeTrackingNumber", () => {
-  it("returns null for null/undefined/empty", () => {
+  it("returns null for empty/blank input", () => {
     expect(sanitizeTrackingNumber(null)).toBeNull();
     expect(sanitizeTrackingNumber(undefined)).toBeNull();
     expect(sanitizeTrackingNumber("")).toBeNull();
     expect(sanitizeTrackingNumber("   ")).toBeNull();
   });
 
-  it("normalizes and uppercases", () => {
-    expect(sanitizeTrackingNumber(" abc-123 ")).toBe("ABC-123");
-    expect(sanitizeTrackingNumber("sr/123_456")).toBe("SR/123_456");
+  it("removes whitespace and uppercases", () => {
+    expect(sanitizeTrackingNumber(" ab -123 45 ")).toBe("AB-12345");
+    expect(sanitizeTrackingNumber("x_y")).toBe("X_Y");
+    expect(sanitizeTrackingNumber("a/b")).toBe("A/B");
   });
 
-  it("strips internal spaces", () => {
-    expect(sanitizeTrackingNumber("AB 12 CD")).toBe("AB12CD");
-  });
-
-  it("throws on invalid characters", () => {
-    expect(() => sanitizeTrackingNumber("abc!")).toThrow(/Allowed characters/);
-    expect(() => sanitizeTrackingNumber("abc@xyz")).toThrow(
-      /Allowed characters/,
+  it("rejects unsupported characters", () => {
+    expect(() => sanitizeTrackingNumber("AB#123")).toThrow(
+      /Invalid tracking number/i,
+    );
+    expect(() => sanitizeTrackingNumber("AB,123")).toThrow(
+      /Invalid tracking number/i,
     );
   });
 
-  it("throws on too-long tracking numbers", () => {
-    const long = "A".repeat(65);
-    expect(() => sanitizeTrackingNumber(long)).toThrow(/too long/);
+  it("enforces max length", () => {
+    const tooLong = "A".repeat(65);
+    expect(() => sanitizeTrackingNumber(tooLong)).toThrow(
+      /Tracking number too long/i,
+    );
   });
 });

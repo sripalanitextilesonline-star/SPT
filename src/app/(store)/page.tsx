@@ -3,11 +3,9 @@ import { Icons } from "@/components/layouts/icons";
 import {
   HomeHeroCarousel,
   HomeCategoriesCarousel,
-  HomePriceCarousel,
-  HomeTestimonialsCarousel,
-  HomeShoppableReels,
   HomeExploreLinks,
 } from "@/features/storefront/components";
+import dynamic from "next/dynamic";
 import { heroSlides } from "@/config/heroSlides";
 import { getHomeBannerSlidesCached } from "@/lib/integrations/settings";
 import { withTimeoutFallback } from "@/lib/resilience";
@@ -15,11 +13,32 @@ import { getDraftProductIdsSafe } from "@/lib/storefront/draft-product-ids";
 import { getLandingPageDataCached } from "@/lib/storefront/landing-data";
 import { getShopByPriceBucketsCached } from "@/lib/storefront/shop-by-price";
 import { getProductPackLabelsByIds } from "@/lib/products/pack.server";
+import { ORDER_RETURNS } from "@/lib/storefront/order-shipping";
 import { siteConfig } from "@/config/site";
 import { cn } from "@/lib/utils";
+import { CDN_PRESETS, cdnImageUrl } from "@/lib/media/cdn-image";
+import { buildSocialImages } from "@/lib/seo/social-image";
 import type { Metadata } from "next";
 
-export const revalidate = 300;
+const HomePriceCarousel = dynamic(() =>
+  import("@/features/storefront/components/HomePriceCarousel").then(
+    (mod) => mod.HomePriceCarousel,
+  ),
+);
+const HomeShoppableReels = dynamic(() =>
+  import("@/features/storefront/components/HomeShoppableReels").then(
+    (mod) => mod.HomeShoppableReels,
+  ),
+);
+const HomeTestimonialsCarousel = dynamic(() =>
+  import("@/features/storefront/components/HomeTestimonialsCarousel").then(
+    (mod) => mod.HomeTestimonialsCarousel,
+  ),
+);
+
+export const revalidate = 120;
+
+const homeSocial = buildSocialImages(null, "Sri Palani Textiles");
 
 export const metadata: Metadata = {
   title: "Sri Palani Textiles | Silk · Cotton · Tradition",
@@ -33,6 +52,13 @@ export const metadata: Metadata = {
     description:
       "Shop premium sarees and textiles at Sri Palani Textiles — silk, cotton, wedding and festive collections.",
     url: "/",
+    ...homeSocial.openGraph,
+  },
+  twitter: {
+    ...homeSocial.twitter,
+    title: "Sri Palani Textiles | Silk · Cotton · Tradition",
+    description:
+      "Shop premium sarees and textiles at Sri Palani Textiles — silk, cotton, wedding and festive collections.",
   },
 };
 
@@ -69,9 +95,6 @@ export default async function Home() {
       ),
     ]);
 
-  // Contact comes from store layout providers; use site default for this section only.
-  const phone = siteConfig.phone;
-
   // Without the draft list we cannot prove a product is publishable, so the
   // reels section stays empty rather than risking an unfinished listing.
   const draftIds = draftProductIds === null ? null : new Set(draftProductIds);
@@ -88,8 +111,21 @@ export default async function Home() {
     featuredProducts.map(({ node }) => node.id),
   );
 
+  const firstHeroImage = slides[0]?.image?.trim() || null;
+  const firstHeroImageSrc = firstHeroImage
+    ? cdnImageUrl(firstHeroImage, CDN_PRESETS.heroMobile)
+    : null;
+
   return (
     <main className="min-h-screen w-full min-w-0 overflow-x-hidden">
+      {firstHeroImageSrc ? (
+        <link
+          rel="preload"
+          as="image"
+          href={firstHeroImageSrc}
+          fetchPriority="high"
+        />
+      ) : null}
       <HomeHeroCarousel slides={slides} />
 
       <Shell>
@@ -131,13 +167,13 @@ export default async function Home() {
         ) : null}
 
         <HomeExploreLinks />
-        <TrustFeatures phone={phone} />
+        <TrustFeatures />
       </Shell>
     </main>
   );
 }
 
-function TrustFeatures({ phone }: { phone: string }) {
+function TrustFeatures() {
   const features = [
     {
       Icon: Icons.package,
@@ -148,13 +184,13 @@ function TrustFeatures({ phone }: { phone: string }) {
     {
       Icon: Icons.cart,
       title: "Contact Support",
-      description: `Call ${phone} or email us anytime.`,
+      description: `Call ${siteConfig.phone} or email us anytime.`,
       iconClass: "text-brand-gold",
     },
     {
       Icon: Icons.tag,
-      title: "Easy Replacement",
-      description: "Simple returns on eligible items.",
+      title: ORDER_RETURNS.trustTitle,
+      description: ORDER_RETURNS.trustDescription,
       iconClass: "text-brand-rose",
     },
     {

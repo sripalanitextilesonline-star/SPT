@@ -1,19 +1,30 @@
 import AdminShell from "@/components/admin/AdminShell";
 import AdminOrderDetailView from "@/features/orders/components/admin/AdminOrderDetailView";
-import { getSessionUser } from "@/lib/auth/admin";
-import { formatOrderDateTimeIst } from "@/lib/datetime/india";
-import { buildDispatchNotificationText } from "@/lib/dispatch/dispatch-message";
-import { getOrderDispatchInfo } from "@/lib/dispatch/get-order-dispatch-info";
 import {
+  formatOrderLineVariant,
   resolveOrderLineImageAlt,
   resolveOrderLineImageKey,
   resolveOrderLineProductCode,
   resolveOrderLineProductName,
   resolveOrderLineProductSlug,
 } from "@/lib/orders/order-line-display";
+import { buildOrderPaymentBreakdown } from "@/lib/orders/order-payment-breakdown";
+import {
+  readCheckoutTelemetry,
+  resolveCheckoutOutcome,
+} from "@/lib/checkout/checkout-outcome";
 import { buildShippingAddressCopyText } from "@/lib/orders/shipping-address-text";
+import { getOrderDispatchInfo } from "@/lib/dispatch/get-order-dispatch-info";
+import { buildDispatchNotificationText } from "@/lib/dispatch/dispatch-message";
+import { formatOrderDateTimeIst } from "@/lib/datetime/india";
+import { displayInternalOrderRef } from "@/lib/orders/internal-order-ref";
 import { keytoUrl } from "@/lib/utils";
 import db from "@/lib/supabase/db";
+import {
+  getProductSizeConfigsByProductIds,
+  optionGroupDisplayNames,
+} from "@/lib/products/sizeConfig";
+import { getSessionUser, isAdminUser } from "@/lib/auth/admin";
 import {
   address,
   dispatchCouriers,
@@ -35,6 +46,7 @@ type AdminOrderDetailPageProps = {
 
 function buildCourierCopyText(payload: {
   orderId: string;
+  internalRef?: string | null;
   createdAt: string;
   customerName: string | null;
   customerMobile: string | null;
@@ -43,17 +55,30 @@ function buildCourierCopyText(payload: {
     productName: string;
     productCode: string | null;
     quantity: number;
+    variantLabel?: string | null;
   }[];
   addressText: string;
+  dispatchInfo?: {
+    courierName: string;
+    trackingNumber: string | null;
+    dispatchedAt: string;
+    trackingUrl: string | null;
+  } | null;
 }) {
   const itemLines = payload.items.map((item, idx) => {
     const code = item.productCode ? ` [${item.productCode}]` : "";
-    return `${idx + 1}. ${item.productName}${code} x ${item.quantity}`;
+    const variant = item.variantLabel ? ` (${item.variantLabel})` : "";
+    return `${idx + 1}. ${item.productName}${code}${variant} x ${item.quantity}`;
   });
 
-  return [
+  const base = [
     `ORDER DISPATCH NOTE`,
     `Order ID: ${payload.orderId}`,
+    ...(payload.internalRef
+      ? [
+          `Internal Ref: ${displayInternalOrderRef(payload.internalRef) ?? payload.internalRef}`,
+        ]
+      : []),
     `Date: ${formatOrderDateTimeIst(payload.createdAt)}`,
     `Customer: ${payload.customerName || "Customer"}`,
     `Mobile: ${payload.customerMobile || "-"}`,
@@ -64,15 +89,36 @@ function buildCourierCopyText(payload: {
     ``,
     `Shipping Address:`,
     payload.addressText,
-  ].join("\n");
+  ];
+
+  if (payload.dispatchInfo) {
+    base.push(
+      "",
+      `Courier: ${payload.dispatchInfo.courierName}`,
+      `Dispatched: ${formatOrderDateTimeIst(payload.dispatchInfo.dispatchedAt)}`,
+    );
+    if (payload.dispatchInfo.trackingNumber) {
+      base.push(`Tracking number: ${payload.dispatchInfo.trackingNumber}`);
+    }
+    if (payload.dispatchInfo.trackingUrl) {
+      base.push(`Track here: ${payload.dispatchInfo.trackingUrl}`);
+    }
+  }
+
+  return base.join("\n");
 }
 
 async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
   const { orderId } = await params;
 
+  const user = await getSessionUser();
+  const admin = await isAdminUser(user);
+  if (!user || !admin) return notFound();
+
   const orderRows = await db
     .select({
       id: orders.id,
+      internalRef: orders.internal_ref,
       createdAt: orders.createdAt,
       amount: orders.amount,
       currency: orders.currency,
@@ -81,6 +127,7 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
       paymentProvider: orders.payment_provider,
       paymentMethod: orders.payment_method,
       paymentReference: orders.payment_reference,
+      paymentMeta: orders.payment_meta,
       customerName: orders.name,
       customerEmail: orders.email,
       customerMobile: orders.customer_mobile,
@@ -105,6 +152,8 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
       productId: orderLines.productId,
       quantity: orderLines.quantity,
       unitPrice: orderLines.price,
+      size: orderLines.size,
+      selections: orderLines.selections,
       productName: products.name,
       productSlug: products.slug,
       productCode: products.productCode,
@@ -120,6 +169,12 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
     .leftJoin(medias, eq(products.featuredImageId, medias.id))
     .where(eq(orderLines.orderId, orderId));
 
+  const sizeConfigs = await getProductSizeConfigsByProductIds(
+    lineRows
+      .map((row) => row.productId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
   const itemViews = lineRows.map((row) => {
     const unitPrice = Number(row.unitPrice ?? 0);
     const productName = resolveOrderLineProductName(row);
@@ -130,6 +185,13 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
       productName,
       productSlug: resolveOrderLineProductSlug(row),
       productCode: resolveOrderLineProductCode(row),
+      variantLabel: formatOrderLineVariant({
+        size: row.size,
+        selections: row.selections as Record<string, unknown> | null,
+        groupNames: row.productId
+          ? optionGroupDisplayNames(sizeConfigs.get(row.productId))
+          : undefined,
+      }),
       imageUrl: keytoUrl(imageKey ?? undefined),
       imageAlt: resolveOrderLineImageAlt(row),
       quantity: row.quantity,
@@ -151,6 +213,7 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
 
   const orderView = {
     id: order.id,
+    internalRef: order.internalRef ?? null,
     createdAt: new Date(order.createdAt).toISOString(),
     amount: Number(order.amount),
     currency: order.currency || "INR",
@@ -163,7 +226,22 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
     customerEmail: order.customerEmail,
     customerMobile: order.customerMobile,
     shippingAddress,
+    paymentBreakdown: buildOrderPaymentBreakdown({
+      paymentMeta: order.paymentMeta,
+      orderAmount: Number(order.amount),
+      lineItems: itemViews.map((item) => ({
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+      })),
+    }),
+    checkoutOutcome: resolveCheckoutOutcome({
+      paymentStatus: order.paymentStatus,
+      paymentMeta: order.paymentMeta,
+    }),
+    checkoutTelemetry: readCheckoutTelemetry(order.paymentMeta),
   };
+
+  const dispatchInfo = await getOrderDispatchInfo(orderId);
 
   const addressText = buildShippingAddressCopyText({
     customerName: orderView.customerName,
@@ -172,6 +250,7 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
   });
   const courierCopyText = buildCourierCopyText({
     orderId: orderView.id,
+    internalRef: orderView.internalRef,
     createdAt: orderView.createdAt,
     customerName: orderView.customerName,
     customerMobile: orderView.customerMobile,
@@ -180,21 +259,19 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
       productName: item.productName,
       productCode: item.productCode,
       quantity: item.quantity,
+      variantLabel: item.variantLabel,
     })),
     addressText,
+    dispatchInfo: dispatchInfo
+      ? {
+          courierName: dispatchInfo.courierName,
+          trackingNumber: dispatchInfo.trackingNumber,
+          dispatchedAt: dispatchInfo.dispatchedAt,
+          trackingUrl: dispatchInfo.trackingUrl,
+        }
+      : null,
   });
 
-  const sessionUser = await getSessionUser();
-  const dispatchInfo = await getOrderDispatchInfo(orderId);
-  const dispatchCouriersList = await db
-    .select({
-      id: dispatchCouriers.id,
-      name: dispatchCouriers.name,
-      trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
-    })
-    .from(dispatchCouriers)
-    .where(eq(dispatchCouriers.isActive, true))
-    .orderBy(asc(dispatchCouriers.name));
   const dispatchNotificationText = dispatchInfo
     ? buildDispatchNotificationText({
         orderId: orderView.id,
@@ -206,10 +283,30 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
       })
     : null;
 
+  const dispatchCouriersList = await db
+    .select({
+      id: dispatchCouriers.id,
+      name: dispatchCouriers.name,
+      trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
+    })
+    .from(dispatchCouriers)
+    .where(eq(dispatchCouriers.isActive, true))
+    .orderBy(asc(dispatchCouriers.name));
+
+  const internalRefLabel = displayInternalOrderRef(orderView.internalRef);
+
   return (
     <AdminShell
-      heading={`Order #${orderView.id}`}
-      description="Packing-ready order details with shipping address and quick copy for courier."
+      heading={
+        internalRefLabel
+          ? `Order ${internalRefLabel}`
+          : `Order #${orderView.id}`
+      }
+      description={
+        internalRefLabel
+          ? `Order #${orderView.id} · Packing-ready order details with shipping address and quick copy for courier.`
+          : "Packing-ready order details with shipping address and quick copy for courier."
+      }
       showBackButton
     >
       <AdminOrderDetailView
@@ -220,7 +317,7 @@ async function OrderDetailPage({ params }: AdminOrderDetailPageProps) {
         dispatchCouriers={dispatchCouriersList}
         dispatchInfo={dispatchInfo}
         dispatchNotificationText={dispatchNotificationText}
-        adminUserId={sessionUser?.id ?? "admin"}
+        adminUserId={user.id}
       />
     </AdminShell>
   );

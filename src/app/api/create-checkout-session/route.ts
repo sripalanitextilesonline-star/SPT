@@ -1,4 +1,6 @@
 import { publicErrorMessage } from "@/lib/api/public-error";
+import { appendCheckoutTelemetryEvent } from "@/lib/checkout/checkout-telemetry";
+import { createOrderAccessToken } from "@/lib/auth/order-access-token";
 import { checkCheckoutRateLimit, getRequestIp } from "@/lib/auth/rate-limit";
 import {
   buildCheckoutLineItems,
@@ -20,10 +22,11 @@ import {
   shouldReserveStockAtCheckout,
   StockReservationError,
 } from "@/lib/orders/stock-reservation";
-import { sweepExpiredStockReservationsIfEnabled } from "@/lib/orders/lazy-stock-reservation-sweep";
 import type { CartItems } from "@/features/carts";
+import { extractProductIdFromCartLineKey } from "@/features/carts/cart-line";
 import { createPhonePePayment } from "@/lib/payments/phonepe";
 import { createCashfreePayment } from "@/lib/payments/cashfree";
+import { createRazorpayPayment } from "@/lib/payments/razorpay";
 import { validatePaymentSessionId } from "@/lib/payments/cashfree-standards";
 import { resolveCheckoutPaymentProvider } from "@/lib/payments/resolve-checkout-provider";
 import { withRetry } from "@/lib/resilience";
@@ -38,15 +41,17 @@ import db from "@/lib/supabase/db";
 import { address, medias, orderLines, orders } from "@/lib/supabase/schema";
 import {
   calculateCourierCharge,
-  calculateGstAmount,
+  buildCheckoutMoneyTotals,
   getCashfreeConfig,
   getIntegrationSetting,
   getPhonePeConfig,
+  getRazorpayConfig,
   INTEGRATION_KEYS,
   resolveCourierChargesConfig,
   resolveOfferCodesConfig,
 } from "@/lib/integrations/settings";
-import { createOrderAccessToken } from "@/lib/auth/order-access";
+import { physicalQuantityForShipping } from "@/lib/products/digital-product";
+import { physicalWeightForShipping } from "@/lib/courier/calculate";
 import { eq, inArray } from "drizzle-orm";
 
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
@@ -58,7 +63,11 @@ import { z } from "zod";
 const shippingSchema = z.object({
   addressId: z.string().min(1),
   fullName: z.string().min(2),
-  email: z.string().email(),
+  email: z
+    .string()
+    .trim()
+    .min(1, "Enter your email")
+    .email("Enter a valid email address"),
   mobile: z.string().min(10),
   state: z.string().min(1),
 });
@@ -66,6 +75,7 @@ const shippingSchema = z.object({
 const orderProductsSchema = z.object({
   orderProducts: z.record(
     z.object({
+      productId: z.string().trim().min(1).optional(),
       quantity: z.number().min(1),
       size: z.string().trim().max(24).optional(),
       selections: z.record(z.string().trim().max(24)).optional(),
@@ -154,30 +164,32 @@ export async function POST(request: Request) {
   let createdOrderId: string | null = null;
 
   try {
-    const [
-      cashfreeConfig,
-      phonePeConfig,
-      cashfreeSetting,
-      phonepeSetting,
-      courierConfig,
-      offerCodesConfig,
-    ] = await Promise.all([
-      getCashfreeConfig(),
-      getPhonePeConfig(),
-      getIntegrationSetting(INTEGRATION_KEYS.cashfree),
-      getIntegrationSetting(INTEGRATION_KEYS.phonepe),
-      resolveCourierChargesConfig(),
-      resolveOfferCodesConfig(),
-    ]);
+    const razorpayConfig = await getRazorpayConfig();
+    const cashfreeConfig = await getCashfreeConfig();
+    const phonePeConfig = await getPhonePeConfig();
+    const razorpaySetting = await getIntegrationSetting(
+      INTEGRATION_KEYS.razorpay,
+    );
+    const cashfreeSetting = await getIntegrationSetting(
+      INTEGRATION_KEYS.cashfree,
+    );
+    const phonepeSetting = await getIntegrationSetting(
+      INTEGRATION_KEYS.phonepe,
+    );
+    const courierConfig = await resolveCourierChargesConfig();
+    const offerCodesConfig = await resolveOfferCodesConfig();
     const stockControlSetting = await getIntegrationSetting(
       INTEGRATION_KEYS.stockControl,
     );
 
-    if (stockControlSetting?.isEnabled) {
-      await sweepExpiredStockReservationsIfEnabled({
-        force: true,
-        stockControlEnabled: true,
-      });
+    if (razorpaySetting?.isEnabled && !razorpayConfig) {
+      return NextResponse.json(
+        {
+          message:
+            "Razorpay is enabled but configuration is incomplete. Update Key ID and Key Secret in Admin settings.",
+        },
+        { status: 400 },
+      );
     }
 
     if (cashfreeSetting?.isEnabled && !cashfreeConfig) {
@@ -201,6 +213,7 @@ export async function POST(request: Request) {
     }
 
     const checkoutProvider = resolveCheckoutPaymentProvider({
+      razorpayConfig,
       cashfreeConfig,
       phonePeConfig,
     });
@@ -213,6 +226,7 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
+    const preferRazorpay = checkoutProvider === "razorpay";
     const preferCashfree = checkoutProvider === "cashfree";
     const preferPhonePe = checkoutProvider === "phonepe";
 
@@ -232,11 +246,20 @@ export async function POST(request: Request) {
         );
       }
     }
-    const sizeConfigs = await getProductSizeConfigsByProductIds(
-      Object.keys(checkout.orderProducts),
-    );
+    const checkoutProductIds = [
+      ...new Set(
+        Object.entries(checkout.orderProducts)
+          .map(([lineKey, item]) =>
+            extractProductIdFromCartLineKey(lineKey, item.productId),
+          )
+          .filter(Boolean),
+      ),
+    ];
+    const sizeConfigs =
+      await getProductSizeConfigsByProductIds(checkoutProductIds);
     for (const line of productsQuantity) {
-      const cartItem = checkout.orderProducts[line.id];
+      if (line.isDigital) continue;
+      const cartItem = checkout.orderProducts[line.cartLineKey];
       const sizeConfig = sizeConfigs.get(line.id);
       const activeGroups = getActiveOptionGroups(sizeConfig);
       if (activeGroups.length === 0) continue;
@@ -322,21 +345,28 @@ export async function POST(request: Request) {
       (sum, item) => sum + item.quantity,
       0,
     );
+    const physicalQuantity = physicalQuantityForShipping(productsQuantity);
+    const physicalWeightKg = physicalWeightForShipping(productsQuantity);
     const courierBreakdown = calculateCourierCharge({
       state: checkout.shipping.state,
-      quantity: totalQuantity,
+      quantity: physicalQuantity,
+      weightKg: physicalWeightKg,
       orderAmount: discountedSubtotal,
       config: courierConfig,
     });
     const courierCharge = courierConfig.enabled ? courierBreakdown.charge : 0;
-    const gstAmount = calculateGstAmount({
-      taxableAmount: discountedSubtotal + courierCharge,
+    const money = buildCheckoutMoneyTotals({
+      exclusiveMerchandise: discountedSubtotal,
+      courierCharge,
       config: courierConfig,
     });
-    const amount = discountedSubtotal + courierCharge + gstAmount;
+    const gstAmount = money.gstAmount;
+    const amount = money.total;
     const paymentEnvironment = resolveCheckoutPaymentEnvironment({
+      preferRazorpay,
       preferCashfree,
       preferPhonePe,
+      razorpayConfig,
       cashfreeConfig,
       phonePeConfig,
     });
@@ -345,29 +375,36 @@ export async function POST(request: Request) {
       shouldReserveStockAtCheckout(paymentEnvironment);
     const linePricing = buildCheckoutLinePricingRecord(productsQuantity);
 
-    const selectedSizes = Object.fromEntries(
-      Object.entries(checkout.orderProducts).map(([id, value]) => [
-        id,
+    const selectedSizesByLine = Object.fromEntries(
+      Object.entries(checkout.orderProducts).map(([lineKey, value]) => [
+        lineKey,
         String(value.size ?? "")
           .trim()
           .toUpperCase(),
       ]),
     );
-    const selectedSelections = Object.fromEntries(
-      Object.entries(checkout.orderProducts).map(([id, value]) => [
-        id,
-        resolveOptionSelections({
-          sizeConfig: sizeConfigs.get(id),
-          selections: value.selections,
-          selectedSize: value.size,
-        }),
-      ]),
+    const selectedSelectionsByLine = Object.fromEntries(
+      Object.entries(checkout.orderProducts).map(([lineKey, value]) => {
+        const productId = extractProductIdFromCartLineKey(
+          lineKey,
+          value.productId,
+        );
+        return [
+          lineKey,
+          resolveOptionSelections({
+            sizeConfig: sizeConfigs.get(productId),
+            selections: value.selections,
+            selectedSize: value.size,
+          }),
+        ];
+      }),
     );
     const productNames = new Map(
       productsQuantity.map((product) => [product.id, product.name]),
     );
 
     const basePaymentMeta = {
+      stockDeductOnPayment: !reserveStock,
       subtotalAmount,
       discountAmount,
       discountPercentage,
@@ -379,11 +416,21 @@ export async function POST(request: Request) {
       gstPercentage: courierConfig.gstPercentage,
       courierState: checkout.shipping.state,
       courierRule: courierBreakdown.ruleApplied,
+      ...(courierBreakdown.weightKg !== undefined
+        ? { courierWeightKg: courierBreakdown.weightKg }
+        : {}),
       totalQuantity,
       paymentEnvironment,
       linePricing,
-      sizes: selectedSizes,
-      selections: selectedSelections,
+      cartLines: Object.entries(checkout.orderProducts).map(
+        ([lineKey, value]) => ({
+          lineKey,
+          productId: extractProductIdFromCartLineKey(lineKey, value.productId),
+          quantity: value.quantity,
+          size: selectedSizesByLine[lineKey] || undefined,
+          selections: selectedSelectionsByLine[lineKey],
+        }),
+      ),
     };
 
     // Do not wrap checkout in drizzle.transaction() — postgres.js begin()
@@ -428,6 +475,7 @@ export async function POST(request: Request) {
           await db.insert(orderLines).values(
             productsQuantity.map(
               ({
+                cartLineKey,
                 id,
                 quantity,
                 pricing,
@@ -435,6 +483,9 @@ export async function POST(request: Request) {
                 slug,
                 productCode,
                 featuredImageId,
+                isDigital,
+                digitalFileKey,
+                digitalFileName,
               }) => ({
                 productId: id,
                 quantity,
@@ -445,6 +496,15 @@ export async function POST(request: Request) {
                 productCodeSnapshot: productCode ?? null,
                 productImageKeySnapshot:
                   mediaKeyById.get(featuredImageId) ?? null,
+                isDigitalSnapshot: Boolean(isDigital),
+                digitalFileKeySnapshot: isDigital
+                  ? digitalFileKey ?? null
+                  : null,
+                digitalFileNameSnapshot: isDigital
+                  ? digitalFileName ?? null
+                  : null,
+                size: selectedSizesByLine[cartLineKey] || null,
+                selections: selectedSelectionsByLine[cartLineKey] ?? {},
               }),
             ),
           );
@@ -454,11 +514,11 @@ export async function POST(request: Request) {
               lines: productsQuantity.map((product) => ({
                 productId: product.id,
                 quantity: product.quantity,
-                size: selectedSizes[product.id] || undefined,
-                selections: selectedSelections[product.id],
+                size: selectedSizesByLine[product.cartLineKey] || undefined,
+                selections: selectedSelectionsByLine[product.cartLineKey],
               })),
-              selectedSizes,
-              selectedSelections,
+              selectedSizes: {},
+              selectedSelections: {},
               sizeConfigs,
               productNames,
             });
@@ -514,6 +574,48 @@ export async function POST(request: Request) {
     const order = insertedOrder[0];
     createdOrderId = order.id;
     const accessToken = createOrderAccessToken(order.id, order.createdAt);
+
+    if (preferRazorpay) {
+      const payment = await createRazorpayPayment({
+        orderId: order.id,
+        amountInRupees: amount,
+        customerName: checkout.shipping.fullName,
+        customerMobile: checkout.shipping.mobile,
+        customerEmail: checkout.shipping.email,
+      });
+
+      if (!payment?.razorpayOrderId) {
+        throw new Error("Razorpay order could not be created");
+      }
+
+      const existingMeta =
+        (order.payment_meta as Record<string, unknown> | null) ?? {};
+
+      await db
+        .update(orders)
+        .set({
+          payment_reference: payment.razorpayOrderId,
+          payment_meta: mergePaymentMeta(existingMeta, {
+            razorpayOrderId: payment.razorpayOrderId,
+          }),
+        })
+        .where(eq(orders.id, order.id));
+
+      await extendStockReservationExpiry(order.id);
+
+      return NextResponse.json({
+        provider: "razorpay",
+        orderId: order.id,
+        accessToken,
+        razorpayOrderId: payment.razorpayOrderId,
+        keyId: payment.keyId,
+        amount: payment.amount,
+        currency: payment.currency,
+        name: payment.name,
+        description: payment.description,
+        prefill: payment.prefill,
+      });
+    }
 
     if (preferCashfree) {
       const payment = await createCashfreePayment({
@@ -613,10 +715,27 @@ export async function POST(request: Request) {
         })
         .where(eq(orders.id, createdOrderId))
         .catch(() => undefined);
+      await appendCheckoutTelemetryEvent({
+        orderId: createdOrderId,
+        type: "checkout_session_failed",
+        reason:
+          err instanceof Error
+            ? err.message.slice(0, 500)
+            : "Checkout initiation failed.",
+        source: "server",
+      }).catch((telemetryErr) => {
+        console.warn("[checkout] telemetry on fail:", telemetryErr);
+      });
     }
 
     if (err instanceof StockReservationError) {
-      return NextResponse.json({ message: err.message }, { status: 409 });
+      return NextResponse.json(
+        {
+          message: err.message,
+          ...(createdOrderId ? { orderId: createdOrderId } : {}),
+        },
+        { status: 409 },
+      );
     }
 
     const raw = err instanceof Error ? err.message.trim() : "";
@@ -627,6 +746,12 @@ export async function POST(request: Request) {
         ? raw
         : publicErrorMessage(err, "Checkout initiation failed. Please retry.");
 
-    return NextResponse.json({ message }, { status: 500 });
+    return NextResponse.json(
+      {
+        message,
+        ...(createdOrderId ? { orderId: createdOrderId } : {}),
+      },
+      { status: 500 },
+    );
   }
 }

@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "cloudflare": {
+      "url": "https://mcp.cloudflare.com/mcp"
+    },
+    "cloudflare-docs": {
+      "url": "https://docs.mcp.cloudflare.com/mcp"
+    },
+    "cloudflare-bindings": {
+      "url": "https://bindings.mcp.cloudflare.com/mcp"
+    },
+    "cloudflare-builds": {
+      "url": "https://builds.mcp.cloudflare.com/mcp"
+    },
+    "cloudflare-observability": {
+      "url": "https://observability.mcp.cloudflare.com/mcp"
+    },
+    "upstash-redis": {
+      "command": "npx",
+      "args": ["-y", "@upstash/redis-mcp"],
+      "env": {
+        "UPSTASH_REDIS_REST_URL": "https://YOUR_DB.upstash.io",
+        "UPSTASH_REDIS_REST_TOKEN": "YOUR_REST_TOKEN"
+      }
+    },
+    "upstash": {
+      "url": "https://mcp.upstash.com/mcp?features=redis"
+    }
+  }
+}

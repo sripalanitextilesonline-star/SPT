@@ -1,9 +1,13 @@
 "use server";
 
 import db from "@/lib/supabase/db";
+import { mapProductSaveError } from "@/lib/supabase/pooler-errors";
 import { productMedias, products } from "@/lib/supabase/schema";
 import { requireAdminActionUser } from "@/lib/auth/require-admin";
-import { invalidateStorefrontCache } from "@/lib/cache/invalidate-storefront";
+import {
+  invalidateProductCaches,
+  loadProductCacheIdentities,
+} from "@/lib/cache/invalidate-storefront";
 import { insertProductWithoutTransaction } from "@/lib/admin/product-insert";
 import {
   buildBulkProductInsertValues,
@@ -14,7 +18,7 @@ import {
   updateProductRecord,
   type ProductImageOptions,
 } from "@/lib/admin/save-product";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 function revalidateProductCatalogPaths() {
@@ -29,11 +33,22 @@ function revalidateProductCatalogPaths() {
   }
 }
 
-async function softInvalidateStorefrontCache() {
+async function softInvalidateProductCaches(
+  params: Parameters<typeof invalidateProductCaches>[0],
+) {
   try {
-    await invalidateStorefrontCache();
+    await invalidateProductCaches(params);
   } catch (error) {
-    console.error("[products] invalidateStorefrontCache failed:", error);
+    console.error("[products] invalidateProductCaches failed:", error);
+  }
+}
+
+async function loadPreviousIdentities(productIds: string[]) {
+  try {
+    return await loadProductCacheIdentities(productIds);
+  } catch (error) {
+    console.warn("[products] previous identity lookup failed:", error);
+    return [];
   }
 }
 
@@ -44,7 +59,7 @@ export const createProductAction = async (
   await requireAdminActionUser();
   const created = await createProductRecord(product, options);
   revalidateProductCatalogPaths();
-  void softInvalidateStorefrontCache();
+  await softInvalidateProductCaches({ productIds: [String(created.id)] });
   return [created];
 };
 
@@ -54,9 +69,10 @@ export const updateProductAction = async (
   options?: ProductImageOptions,
 ) => {
   await requireAdminActionUser();
+  const previous = await loadPreviousIdentities([productId]);
   const updated = await updateProductRecord(productId, product, options);
   revalidateProductCatalogPaths();
-  void softInvalidateStorefrontCache();
+  await softInvalidateProductCaches({ productIds: [productId], previous });
   return [updated];
 };
 
@@ -113,14 +129,14 @@ export async function createDraftProductsFromMedia(
     throw new Error("Catalog is required.");
   }
 
-  return (async () => {
+  try {
     const createdProducts: BulkDraftCreateResult[] = [];
 
-    for (let index = 0; index < mediaItems.length; index += 1) {
-      const fileNameBase = getFileNameBase(mediaItems[index].originalFileName);
+    for (const media of mediaItems) {
+      const fileNameBase = getFileNameBase(media.originalFileName);
       const nameBase = (normalizedShared.baseName || fileNameBase).trim();
 
-      const created = await insertProductWithoutTransaction(
+      const row = await insertProductWithoutTransaction(
         (productCode) => `${nameBase} ${productCode}`,
         (identity) =>
           buildBulkProductInsertValues({
@@ -128,26 +144,30 @@ export async function createDraftProductsFromMedia(
             productName: identity.name,
             slug: identity.slug,
             productCode: identity.productCode,
-            featuredImageId: mediaItems[index].mediaId,
+            featuredImageId: media.mediaId,
           }),
       );
 
       await db.insert(productMedias).values({
-        productId: created.id,
-        mediaId: mediaItems[index].mediaId,
+        productId: row.id,
+        mediaId: media.mediaId,
         priority: 1,
       });
 
       createdProducts.push({
-        id: created.id,
-        name: created.name,
-        slug: created.slug,
-        productCode: created.productCode ?? "",
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        productCode: row.productCode ?? "",
       });
     }
 
     revalidateProductCatalogPaths();
-    await invalidateStorefrontCache();
+    await softInvalidateProductCaches({
+      productIds: createdProducts.map((row) => row.id),
+    });
     return createdProducts;
-  })();
+  } catch (error) {
+    throw mapProductSaveError(error);
+  }
 }

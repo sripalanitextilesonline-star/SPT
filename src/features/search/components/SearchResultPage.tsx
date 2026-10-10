@@ -9,11 +9,15 @@ import {
   type StorefrontProductsInitialData,
 } from "@/hooks/useStorefrontProducts";
 import { useProductPackLabels } from "@/hooks/useProductPackLabels";
+import { useProductSizePreviews } from "@/hooks/useProductSizePreviews";
 import { useInfiniteScrollSentinel } from "@/hooks/useInfiniteScrollSentinel";
 import { normalizeStorefrontSearchTerm } from "@/lib/storefront/search-utils";
 import { formatPriceRangeLabel } from "@/lib/storefront/shop-by-price-buckets";
+import type { ProductSizePreview } from "@/lib/products/sizeConfig-shared";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
+import { cn } from "@/lib/utils";
+import { useListingFilterNavigationPending } from "./ListingFilterNavigation";
 import { SearchMatchingCollections } from "./SearchMatchingCollections";
 import SearchProductsGridSkeleton from "./SearchProductsGridSkeleton";
 
@@ -28,6 +32,7 @@ const SearchResultPage = ({
   initialData,
   initialDraftIds,
   initialPackLabels,
+  initialSizePreviews,
 }: {
   variables: SearchQueryVariables;
   onLoadMore: (cursor: string) => void;
@@ -37,8 +42,10 @@ const SearchResultPage = ({
   initialData?: StorefrontProductsInitialData;
   initialDraftIds?: string[];
   initialPackLabels?: Record<string, string | null>;
+  initialSizePreviews?: Record<string, ProductSizePreview>;
 }) => {
   const searchParams = useSearchParams();
+  const filterNavPending = useListingFilterNavigationPending();
   const { productsCollection, matchingCollections, fetching, error } =
     useStorefrontProductSearch(variables, collectionId, { initialData });
   const { draftIds, draftLoaded } = useDraftProductIds(initialDraftIds);
@@ -68,12 +75,15 @@ const SearchResultPage = ({
     [visibleEdges],
   );
   const packLabels = useProductPackLabels(visibleIds, initialPackLabels);
+  const sizePreviews = useProductSizePreviews(visibleIds, initialSizePreviews);
 
   const hasCollectionMatches =
     showMatchingCollections && matchingCollections.length > 0;
   const hasProductMatches = visibleEdges.length > 0;
   const hasAnyMatches = hasCollectionMatches || hasProductMatches;
   const showSkeleton = (fetching || !draftLoaded) && !productsCollection;
+  const isRefreshing =
+    filterNavPending || (fetching && Boolean(productsCollection));
 
   const endCursor = productsCollection?.pageInfo?.endCursor ?? "";
   const canLoadMore = Boolean(
@@ -98,8 +108,14 @@ const SearchResultPage = ({
 
       {showSkeleton && <SearchProductsGridSkeleton />}
 
-      {productsCollection && draftLoaded && !showSkeleton && (
-        <>
+      {productsCollection && draftLoaded && (
+        <div
+          className={cn(
+            isRefreshing && "pointer-events-none opacity-60 transition-opacity",
+          )}
+          aria-busy={isRefreshing}
+          aria-live="polite"
+        >
           {hasCollectionMatches ? (
             <SearchMatchingCollections
               collections={matchingCollections}
@@ -130,8 +146,9 @@ const SearchResultPage = ({
                 <ProductCard
                   key={node.id}
                   product={node as ProductNode}
-                  priorityImage={showMatchingCollections && index < 2}
+                  priorityImage={!variables.after && index < 4}
                   packLabel={packLabels[node.id] ?? null}
+                  sizePreview={sizePreviews[node.id] ?? null}
                 />
               ))}
             </section>
@@ -155,7 +172,7 @@ const SearchResultPage = ({
               ) : null}
             </div>
           ) : null}
-        </>
+        </div>
       )}
     </div>
   );

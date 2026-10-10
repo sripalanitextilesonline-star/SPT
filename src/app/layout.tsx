@@ -1,12 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { siteConfig } from "@/config/site";
 import { brandSans, heroSerif } from "@/lib/fonts";
+import { absoluteSocialFallbackUrl } from "@/lib/seo/social-image";
 import { getURL } from "@/lib/utils";
 import CustomProvider from "../providers/CustomProvider";
+import { MicrosoftClarity } from "@/components/analytics/MicrosoftClarity";
+import { ClaritySpaTracker } from "@/components/analytics/ClaritySpaTracker";
+import { WebViewErrorNoiseFilter } from "@/components/analytics/WebViewErrorNoiseFilter";
 
 const siteUrl = getURL();
+const defaultSocialImageUrl = absoluteSocialFallbackUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -42,9 +47,9 @@ export const metadata: Metadata = {
     description: siteConfig.description,
     images: [
       {
-        url: "/images/sri-palani-textiles-logo.png",
-        width: 464,
-        height: 193,
+        url: defaultSocialImageUrl,
+        width: 1200,
+        height: 630,
         alt: siteConfig.name,
       },
     ],
@@ -53,7 +58,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: `${siteConfig.name} | ${siteConfig.tagline}`,
     description: siteConfig.description,
-    images: ["/images/sri-palani-textiles-logo.png"],
+    images: [defaultSocialImageUrl],
   },
   robots: {
     index: true,
@@ -86,6 +91,13 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#18181b",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -99,6 +111,9 @@ export default function RootLayout({
         >
           {children}
           <Toaster />
+          <WebViewErrorNoiseFilter />
+          <MicrosoftClarity />
+          <ClaritySpaTracker />
         </body>
       </CustomProvider>
     </html>

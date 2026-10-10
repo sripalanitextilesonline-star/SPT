@@ -3,38 +3,39 @@ import { useToast } from "@/components/ui/use-toast";
 import { useBulkOrderGuardConfig } from "@/providers/BulkOrderGuardProvider";
 import { useStockControlConfig } from "@/providers/StockControlProvider";
 import { User } from "@supabase/auth-helpers-nextjs";
-import { useMutation, useQuery } from "@urql/next";
-import { FetchCartQuery } from "../components/UserCartSection";
-import { createCartMutation, updateCartsMutation } from "../query";
 import { isBulkOrderQuantity } from "../constants/bulkOrder";
 import useCartStore, { type OptionSelections } from "../useCartStore";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  fetchCartSizeConfigsByProductIds,
+  shouldBlockBareCartAdd,
+  type CartSizeConfigPayload,
+} from "../cart-options-guard";
+import { purgeStaleCartLinesAfterCompleteAdd } from "../cart-purge";
+import { clearAuthCartClearedMarker } from "../cart-cleared-marker";
+import { scheduleAddedToCartToast } from "../added-to-cart-toast";
+import {
+  buildOptimisticCartLineKeys,
+  getCartLineQuantity,
+  purgeStaleLocalCartLinesAfterCompleteAdd,
+  snapshotCart,
+  syncAuthCartAfterOptimisticAdd,
+} from "../optimistic-cart-add";
 
 type AddOpts = {
   silent?: boolean;
   size?: string;
   selections?: OptionSelections;
+  /** Listing-card preview — skip `/api/products/size-config` when provided. */
+  sizeConfigHint?: CartSizeConfigPayload | null;
 };
 
-function selectionsEqual(
-  a?: OptionSelections | null,
-  b?: OptionSelections | null,
+function scheduleAddToCartToast(
+  toast: ReturnType<typeof useToast>["toast"],
+  silent?: boolean,
 ) {
-  const left = a ?? {};
-  const right = b ?? {};
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-  for (const key of keys) {
-    if (
-      String(left[key] ?? "")
-        .trim()
-        .toUpperCase() !==
-      String(right[key] ?? "")
-        .trim()
-        .toUpperCase()
-    ) {
-      return false;
-    }
-  }
-  return true;
+  scheduleAddedToCartToast(toast, { silent });
 }
 
 function useCartActions(
@@ -45,61 +46,86 @@ function useCartActions(
   const { toast } = useToast();
   const bulkOrder = useBulkOrderGuardConfig();
   const stockControl = useStockControlConfig();
-  const [, addToCart] = useMutation(createCartMutation);
-  const [, updateCart] = useMutation(updateCartsMutation);
   const addProductStorage = useCartStore((s) => s.addProductToCart);
-  const setProductSize = useCartStore((s) => s.setProductSize);
-  const setProductSelections = useCartStore((s) => s.setProductSelections);
+  const replaceCart = useCartStore((s) => s.replaceCart);
+  const removeProductStorage = useCartStore((s) => s.removeProduct);
   const guestCart = useCartStore((s) => s.cart);
 
-  const [{ data }, refetch] = useQuery({
-    query: FetchCartQuery,
-    variables: {
-      userId: user ? user.id : undefined,
-    },
-  });
+  const supabase: SupabaseClient | null = user ? createSupabaseClient() : null;
+
+  const assertOptionsComplete = async (opts: AddOpts) => {
+    const resolveSizeConfig = async () => {
+      if (opts.sizeConfigHint !== undefined) {
+        return opts.sizeConfigHint;
+      }
+      const configs = await fetchCartSizeConfigsByProductIds([productId]);
+      return configs[productId] ?? null;
+    };
+
+    const sizeConfig = await resolveSizeConfig();
+    if (
+      shouldBlockBareCartAdd({
+        sizeConfig,
+        selections: opts.selections,
+        size: opts.size,
+      })
+    ) {
+      if (!opts.silent) {
+        const optionName = String(sizeConfig?.name ?? "").trim() || "option";
+        toast({
+          title: `Select ${optionName} first`,
+          description: `This product has ${optionName.toLowerCase()} options. Open the product page and choose before adding to cart.`,
+        });
+      }
+      return false;
+    }
+    return true;
+  };
 
   const authAddOrUpdateProduct = async (
     quantity: number,
     opts: AddOpts = {},
   ) => {
-    const size = opts.size;
-    const selections = opts.selections;
-    const existedProduct = data?.cartsCollection.edges.find(
-      ({ node }) => node.product_id === productId,
-    );
-    const currentQuantity = existedProduct?.node.quantity ?? 0;
-    const currentItem = guestCart[productId];
-    const hasConflict =
-      currentQuantity > 0 &&
-      ((selections &&
-        currentItem?.selections &&
-        !selectionsEqual(currentItem.selections, selections)) ||
-        (size &&
-          currentItem?.size &&
-          !selections &&
-          currentItem.size !== size));
-    if (hasConflict) {
-      if (!opts.silent) {
-        toast({
-          title: "Option mismatch",
-          description:
-            "This product is already in cart with a different option. Remove it first, then add the new choice.",
-          variant: "destructive",
-        });
-      }
+    if (!user || !supabase) {
       return { blockedBulk: false, added: false };
     }
+
+    if (quantity > 0 && !(await assertOptionsComplete(opts))) {
+      return { blockedBulk: false, added: false, blockedOptions: true };
+    }
+
+    const {
+      normalizedSize,
+      selections,
+      variantKey,
+      lineKey,
+      sizeOrSelections,
+    } = buildOptimisticCartLineKeys({
+      productId,
+      quantity,
+      size: opts.size,
+      selections: opts.selections,
+      sizeConfig: opts.sizeConfigHint,
+    });
+
+    const currentQuantity = getCartLineQuantity(
+      guestCart,
+      productId,
+      normalizedSize,
+      selections,
+    );
+    const nextQuantity = currentQuantity + quantity;
+
     if (
       bulkOrder.enabled &&
-      isBulkOrderQuantity(currentQuantity + quantity, bulkOrder.threshold)
+      isBulkOrderQuantity(nextQuantity, bulkOrder.threshold)
     ) {
       return { blockedBulk: true, added: false };
     }
     if (
       stockControl.enabled &&
       typeof availableStock === "number" &&
-      currentQuantity + quantity > availableStock
+      nextQuantity > availableStock
     ) {
       if (!opts.silent) {
         toast({
@@ -110,72 +136,88 @@ function useCartActions(
       }
       return { blockedBulk: false, added: false };
     }
-    try {
-      let res;
-      if (!existedProduct) {
-        res = await addToCart({
-          productId,
-          userId: user!.id,
-          quantity,
-        });
-        refetch({ requestPolicy: "network-only" });
-      } else {
-        res = await updateCart({
-          productId,
-          userId: user!.id,
-          newQuantity: existedProduct.node.quantity + quantity,
-        });
-        refetch({ requestPolicy: "network-only" });
-      }
-      if (selections && Object.keys(selections).length > 0) {
-        setProductSelections(productId, selections);
-      } else if (size) {
-        setProductSize(productId, size);
-      }
-      if (res && !res.error && !opts.silent)
-        toast({ title: "Success, Added a Product to the Cart." });
-      return { blockedBulk: false, added: true };
-    } catch {
-      if (!opts.silent) toast({ title: "Error, Unexpected Error occurred." });
-      return { blockedBulk: false, added: false };
+
+    const cartSnapshot = snapshotCart(useCartStore.getState().cart);
+
+    if (quantity > 0 && opts.sizeConfigHint !== undefined) {
+      purgeStaleLocalCartLinesAfterCompleteAdd({
+        cart: useCartStore.getState().cart,
+        productId,
+        sizeConfig: opts.sizeConfigHint ?? undefined,
+        keepVariantKey: variantKey,
+        keepLineKey: lineKey,
+        newSelections: selections,
+        newSize: normalizedSize,
+        removeProduct: removeProductStorage,
+      });
     }
+
+    addProductStorage(productId, quantity, sizeOrSelections);
+    clearAuthCartClearedMarker();
+    scheduleAddToCartToast(toast, opts.silent);
+
+    void syncAuthCartAfterOptimisticAdd({
+      supabase,
+      userId: user.id,
+      productId,
+      variantKey,
+      lineKey,
+      normalizedSize,
+      selections,
+      sizeConfigHint: opts.sizeConfigHint,
+      removeProduct: removeProductStorage,
+    }).then((ok) => {
+      if (ok) return;
+      replaceCart(cartSnapshot);
+      if (!opts.silent) {
+        toast({
+          title: "Could not save cart",
+          description: "Your cart was rolled back. Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
+
+    return { blockedBulk: false, added: true, optimistic: true };
   };
 
-  const guestAddProduct = (quantity: number, opts: AddOpts = {}) => {
-    const size = opts.size;
-    const selections = opts.selections;
-    const currentQuantity = guestCart[productId]?.quantity ?? 0;
-    const currentItem = guestCart[productId];
-    const hasConflict =
-      currentQuantity > 0 &&
-      ((selections &&
-        currentItem?.selections &&
-        !selectionsEqual(currentItem.selections, selections)) ||
-        (size &&
-          currentItem?.size &&
-          !selections &&
-          currentItem.size !== size));
-    if (hasConflict) {
-      if (!opts.silent) {
-        toast({
-          title: "Option mismatch",
-          description:
-            "This product is already in cart with a different option. Remove it first, then add the new choice.",
-          variant: "destructive",
-        });
-      }
-      return { blockedBulk: false, added: false };
+  const guestAddProduct = async (quantity: number, opts: AddOpts = {}) => {
+    if (quantity > 0 && !(await assertOptionsComplete(opts))) {
+      return { blockedBulk: false, added: false, blockedOptions: true };
     }
+
+    const {
+      normalizedSize,
+      selections,
+      variantKey,
+      lineKey,
+      sizeOrSelections,
+    } = buildOptimisticCartLineKeys({
+      productId,
+      quantity,
+      size: opts.size,
+      selections: opts.selections,
+      sizeConfig: opts.sizeConfigHint,
+    });
+
+    const currentQuantity = getCartLineQuantity(
+      guestCart,
+      productId,
+      normalizedSize,
+      selections,
+    );
+    const nextQuantity = currentQuantity + quantity;
+
     if (
       bulkOrder.enabled &&
-      isBulkOrderQuantity(currentQuantity + quantity, bulkOrder.threshold)
+      isBulkOrderQuantity(nextQuantity, bulkOrder.threshold)
     ) {
       return { blockedBulk: true, added: false };
     }
     if (
       stockControl.enabled &&
       typeof availableStock === "number" &&
-      currentQuantity + quantity > availableStock
+      nextQuantity > availableStock
     ) {
       if (!opts.silent) {
         toast({
@@ -186,9 +228,37 @@ function useCartActions(
       }
       return { blockedBulk: false, added: false };
     }
-    addProductStorage(productId, quantity, selections ?? size);
-    if (!opts.silent) toast({ title: "Sucess, Added a Product to the Cart." });
-    return { blockedBulk: false, added: true };
+
+    if (quantity > 0) {
+      if (opts.sizeConfigHint !== undefined) {
+        purgeStaleLocalCartLinesAfterCompleteAdd({
+          cart: useCartStore.getState().cart,
+          productId,
+          sizeConfig: opts.sizeConfigHint ?? undefined,
+          keepVariantKey: variantKey,
+          keepLineKey: lineKey,
+          newSelections: selections,
+          newSize: normalizedSize,
+          removeProduct: removeProductStorage,
+        });
+      } else {
+        await purgeStaleCartLinesAfterCompleteAdd({
+          supabase: null,
+          userId: null,
+          productId,
+          keepVariantKey: variantKey,
+          keepLineKey: lineKey,
+          newSelections: selections,
+          newSize: normalizedSize,
+          cart: guestCart,
+          removeProduct: removeProductStorage,
+        });
+      }
+    }
+
+    addProductStorage(productId, quantity, sizeOrSelections);
+    scheduleAddToCartToast(toast, opts.silent);
+    return { blockedBulk: false, added: true, optimistic: true };
   };
 
   const addProductToCart = async (

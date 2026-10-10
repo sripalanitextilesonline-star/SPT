@@ -138,6 +138,19 @@ export function getActiveOptionGroups(
   );
 }
 
+/** Group id → display name for packing labels, including disabled configs. */
+export function optionGroupDisplayNames(
+  config: ProductSizeConfig | null | undefined,
+): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const group of config?.groups ?? []) {
+    const id = String(group.id ?? "").trim();
+    if (!id) continue;
+    names[id] = normalizeOptionName(group.name);
+  }
+  return names;
+}
+
 export function getSelectableGroupOptions(
   group: ProductOptionGroup | null | undefined,
 ): ProductOptionChoice[] {
@@ -427,5 +440,132 @@ export function serializeProductSizeConfig(
     // Legacy mirrors for any external reader still expecting flat shape.
     name: first?.name ?? DEFAULT_PRODUCT_OPTION_NAME,
     options: first?.options ?? [],
+  };
+}
+
+/** One selectable choice for listing-card variant pills. */
+export type ProductSizePreviewChoice = {
+  value: string;
+  label: string;
+  price: number | null;
+};
+
+/** Slim listing-card size preview (Shopify-style light PLP payload). */
+export type ProductSizePreview = {
+  enabled: boolean;
+  optionName: string;
+  labels: string[];
+  /** First active group id — used when adding from the listing card. */
+  groupId: string;
+  choices: ProductSizePreviewChoice[];
+  /** Single option group — shopper can pick on the listing card. */
+  canPickOnListing: boolean;
+};
+
+export const EMPTY_PRODUCT_SIZE_PREVIEW: ProductSizePreview = {
+  enabled: false,
+  optionName: DEFAULT_PRODUCT_OPTION_NAME,
+  labels: [],
+  groupId: "",
+  choices: [],
+  canPickOnListing: false,
+};
+
+/** Format one in-stock option for listing pills (e.g. `XL : 2`). */
+export function formatSizeOptionLabel(option: {
+  value?: string | null;
+  size?: string | null;
+  qty?: number | null;
+}): string {
+  const size = String(option.value ?? option.size ?? "")
+    .trim()
+    .toUpperCase();
+  const qty = Number(option.qty ?? 0);
+  if (!size) return `${qty}`;
+  if (/^[A-Z]+$/.test(size)) return `${size} : ${qty}`;
+  return size;
+}
+
+type SizePreviewSource = {
+  enabled?: boolean;
+  name?: string | null;
+  options?: Array<{
+    value?: string | null;
+    size?: string | null;
+    qty?: number | null;
+  }> | null;
+  groups?: Array<{
+    id?: string | null;
+    name?: string | null;
+    options?: Array<{
+      value?: string | null;
+      size?: string | null;
+      qty?: number | null;
+      price?: number | null;
+    }> | null;
+  }> | null;
+};
+
+function choiceListingLabel(option: {
+  value?: string | null;
+  size?: string | null;
+  qty?: number | null;
+}): string {
+  const value = String(option.value ?? option.size ?? "")
+    .trim()
+    .toUpperCase();
+  if (value) return value;
+  return String(Number(option.qty ?? 0));
+}
+
+/** Map full/API size config → listing preview labels (qty > 0 only). */
+export function toProductSizePreview(
+  config: SizePreviewSource | null | undefined,
+): ProductSizePreview {
+  if (!config?.enabled) {
+    return { ...EMPTY_PRODUCT_SIZE_PREVIEW };
+  }
+
+  const normalized = normalizeProductSizeConfig(config);
+  const activeGroups = getActiveOptionGroups(normalized);
+  if (activeGroups.length === 0) {
+    const optionName = getProductOptionDisplayName(normalized);
+    return { ...EMPTY_PRODUCT_SIZE_PREVIEW, optionName };
+  }
+
+  const optionName = getProductOptionDisplayName(activeGroups[0]);
+  const labels = activeGroups.flatMap((group) =>
+    getSelectableGroupOptions(group).map((option) => {
+      const label = formatSizeOptionLabel(option);
+      return activeGroups.length > 1
+        ? `${getProductOptionDisplayName(group)}: ${label}`
+        : label;
+    }),
+  );
+
+  if (labels.length === 0) {
+    return { ...EMPTY_PRODUCT_SIZE_PREVIEW, optionName };
+  }
+
+  const canPickOnListing = activeGroups.length === 1;
+  const group = activeGroups[0];
+  const choices: ProductSizePreviewChoice[] = canPickOnListing
+    ? getSelectableGroupOptions(group).map((option) => {
+        const value = choiceListingLabel(option);
+        return {
+          value,
+          label: value,
+          price: getOptionListPrice(option),
+        };
+      })
+    : [];
+
+  return {
+    enabled: true,
+    optionName,
+    labels,
+    groupId: canPickOnListing ? group.id : "",
+    choices,
+    canPickOnListing,
   };
 }

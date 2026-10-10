@@ -15,16 +15,16 @@ import { publicErrorMessage } from "@/lib/api/public-error";
 import { withDbAsync } from "@/lib/supabase/db";
 import { Suspense } from "react";
 
-function OrdersContentSkeleton() {
+function OrdersSkeleton() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <Skeleton className="h-24 w-full rounded-lg" />
         <Skeleton className="h-24 w-full rounded-lg" />
       </div>
-      <Skeleton className="h-10 w-full max-w-xl" />
+      <Skeleton className="h-5 w-48" />
       <div className="space-y-3">
-        {Array.from({ length: 6 }).map((_, index) => (
+        {Array.from({ length: 5 }).map((_, index) => (
           <Skeleton key={index} className="h-24 w-full rounded-lg" />
         ))}
       </div>
@@ -40,6 +40,7 @@ const PAID_PAGE_PARAM = "paidPage";
 const PENDING_PAGE_PARAM = "pendingPage";
 const PAGE_SIZE_PARAM = "pageSize";
 const STATUS_PARAM = "status";
+const SEARCH_PARAM = "q";
 
 type AdminOrdersPageProps = {
   searchParams: Promise<{
@@ -62,7 +63,10 @@ export default async function OrdersPage({
   const resolved = await searchParams;
   return (
     <AdminShell heading="Orders">
-      <Suspense fallback={<OrdersContentSkeleton />}>
+      {/* Suspense lets the shell stream immediately while DB queries run.
+          Tab switches use startTransition(router.push) so React keeps the
+          current content visible — the skeleton only shows on first load. */}
+      <Suspense fallback={<OrdersSkeleton />}>
         <OrdersPageContent searchParams={resolved} />
       </Suspense>
     </AdminShell>
@@ -84,6 +88,10 @@ async function OrdersPageContent({
   const segment = parseOrdersSegment(searchParams[STATUS_PARAM]);
   const paidPage = parseAdminOrdersPage(searchParams[PAID_PAGE_PARAM]);
   const pendingPage = parseAdminOrdersPage(searchParams[PENDING_PAGE_PARAM]);
+  const rawQuery = searchParams[SEARCH_PARAM];
+  const query = String(
+    (Array.isArray(rawQuery) ? rawQuery[0] : rawQuery) ?? "",
+  ).trim();
 
   const emptyList = {
     rows: [] as Awaited<ReturnType<typeof getAdminOrdersList>>["rows"],
@@ -98,25 +106,28 @@ async function OrdersPageContent({
   let unpaid = emptyList;
 
   try {
+    // Sequential on purpose: Vercel uses a single postgres.js connection
+    // (max: 1) against Supabase transaction pooler (port 6543). Concurrent
+    // queries pipeline on that socket and hang until the request dies —
+    // which previously looked like an endless skeleton, then this alert.
     const result = await withDbAsync(async () => {
-      const countsPromise = getAdminOrdersCounts();
+      const nextCounts = await getAdminOrdersCounts(query);
       if (segment === "paid") {
-        const [nextCounts, nextPaid] = await Promise.all([
-          countsPromise,
-          getAdminOrdersList({ segment: "paid", page: paidPage, pageSize }),
-        ]);
+        const nextPaid = await getAdminOrdersList({
+          segment: "paid",
+          page: paidPage,
+          pageSize,
+          query,
+        });
         return { counts: nextCounts, paid: nextPaid, unpaid: emptyList };
       }
 
-      const [nextCounts, nextUnpaid] = await Promise.all([
-        countsPromise,
-        getAdminOrdersList({
-          // DB segment key is "pending" (unpaid / needs attention).
-          segment: "pending",
-          page: pendingPage,
-          pageSize,
-        }),
-      ]);
+      const nextUnpaid = await getAdminOrdersList({
+        segment: "pending",
+        page: pendingPage,
+        pageSize,
+        query,
+      });
       return { counts: nextCounts, paid: emptyList, unpaid: nextUnpaid };
     });
     counts = result.counts;
@@ -127,12 +138,15 @@ async function OrdersPageContent({
       `[admin/orders] page load failed (segment=${segment}):`,
       error,
     );
-    fetchError = publicErrorMessage(
-      error,
-      segment === "unpaid"
-        ? "Failed to load unpaid orders."
-        : "Failed to load paid orders.",
-    );
+    fetchError =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : publicErrorMessage(
+            error,
+            segment === "unpaid"
+              ? "Failed to load unpaid orders."
+              : "Failed to load paid orders.",
+          );
   }
 
   const resetPageParams = [PAID_PAGE_PARAM, PENDING_PAGE_PARAM];
@@ -147,7 +161,6 @@ async function OrdersPageContent({
       ) : null}
 
       <AdminOrdersSegmentTabs
-        key={segment}
         segment={segment}
         counts={counts}
         paid={paid}
@@ -156,6 +169,7 @@ async function OrdersPageContent({
         unpaidPageParam={PENDING_PAGE_PARAM}
         pageSizeParam={PAGE_SIZE_PARAM}
         resetPageParams={resetPageParams}
+        appliedQuery={query}
       />
     </div>
   );

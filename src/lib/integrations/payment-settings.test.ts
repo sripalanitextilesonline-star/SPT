@@ -5,6 +5,7 @@ import {
   normalizePhonePeIncoming,
   parseEnabledPhonePeValue,
   parseIncomingPhonePeForEnable,
+  parseIncomingRazorpayForEnable,
   resolveCashfreeBaseUrl,
   resolvePhonePeEnvironment,
 } from "./payment-settings";
@@ -61,6 +62,15 @@ describe("payment-settings", () => {
 
     expect(normalized.clientId).toBe("");
     expect(parseEnabledPhonePeValue(normalized).success).toBe(false);
+  });
+
+  it("requires a live key for production Razorpay", () => {
+    const parsed = parseIncomingRazorpayForEnable({
+      keyId: "rzp_test_abc123",
+      keySecret: "secretsecretsecret",
+      environment: "production",
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("maps legacy merchantId/saltKey/saltIndex to OAuth fields", () => {

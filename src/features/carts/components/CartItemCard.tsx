@@ -2,7 +2,7 @@
 import { DocumentType } from "@/gql";
 import { CartItemCardFragment } from "../fragments/CartItemCardFragment";
 
-import Image from "next/image";
+import { StorefrontImage } from "@/components/media/StorefrontImage";
 import React from "react";
 
 import QuantityInput from "../../../components/layouts/QuantityInput";
@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/card";
 
 import { ProductPriceDisplay } from "@/features/products/components/ProductPriceDisplay";
+import { ProductOptionTiles } from "@/features/products/components/ProductOptionTiles";
 import { formatProductPackLabel } from "@/lib/products/pack";
-import { getStorefrontImageProps, keytoUrl } from "@/lib/utils";
+import { cn, keytoUrl } from "@/lib/utils";
 import { UseQueryExecute } from "@urql/next";
 import Link from "next/link";
 import { Icons } from "../../../components/layouts/icons";
@@ -66,6 +67,8 @@ function CartItemCard({
   optionGroups,
   onSizeChange,
   onSelectionsChange,
+  className,
+  ...props
 }: CartItemCardProps) {
   const groups =
     optionGroups && optionGroups.length > 0
@@ -80,7 +83,8 @@ function CartItemCard({
           ]
         : [];
   const packLabel = formatProductPackLabel(product);
-  const imageSrc = keytoUrl(product.featuredImage.key);
+  const imageSrc = keytoUrl(product.featuredImage?.key);
+  const imageAlt = product.featuredImage?.alt || product.name;
 
   const missingRequired = groups.some((group) => {
     const selected = String(selections?.[group.id] ?? selectedSize ?? "")
@@ -91,16 +95,25 @@ function CartItemCard({
   });
 
   return (
-    <Card className="flex items-start gap-3 border-0 bg-transparent px-3 py-3 shadow-none md:items-center md:gap-6 md:px-5">
+    <Card
+      className={cn(
+        "flex items-start gap-3 border-0 bg-transparent px-3 py-3 shadow-none md:items-center md:gap-6 md:px-5",
+        className,
+      )}
+      data-cart-line-incomplete={missingRequired ? "true" : undefined}
+      {...props}
+    >
       <CardContent className="relative shrink-0 overflow-hidden p-0">
-        <Image
-          src={imageSrc}
-          alt={product.featuredImage.alt}
-          width={150}
-          height={150}
-          className="aspect-square h-[72px] w-[72px] rounded-md object-cover md:h-[120px] md:w-[120px]"
-          {...getStorefrontImageProps(imageSrc)}
-        />
+        <Link href={`/shop/${product.slug}`} className="block">
+          <StorefrontImage
+            src={imageSrc}
+            alt={imageAlt}
+            width={150}
+            height={150}
+            optimizeWidth={200}
+            className="aspect-square h-[72px] w-[72px] rounded-md object-cover md:h-[120px] md:w-[120px]"
+          />
+        </Link>
       </CardContent>
 
       <CardHeader className="min-w-0 flex-1 space-y-2 p-0">
@@ -122,38 +135,40 @@ function CartItemCard({
               )
                 .trim()
                 .toUpperCase();
+              const tileOptions = group.options.map((option) => {
+                const rawLabel = String(option.label ?? option.value ?? "");
+                const priceMatch = rawLabel.match(/₹\s*([\d,]+(?:\.\d+)?)/);
+                const price = priceMatch
+                  ? Number(priceMatch[1].replace(/,/g, ""))
+                  : null;
+                const label =
+                  rawLabel.replace(/\s*[·•]\s*₹[\d,]+(?:\.\d+)?/g, "").trim() ||
+                  option.value;
+                return {
+                  value: option.value,
+                  label,
+                  price: Number.isFinite(price) ? price : null,
+                };
+              });
               return (
-                <div key={group.id} className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    {group.name}
-                  </label>
-                  <select
-                    value={value}
-                    disabled={disabled || group.options.length === 0}
-                    className="h-8 w-full max-w-[220px] rounded border bg-background px-2 text-xs"
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      if (onSelectionsChange) {
-                        onSelectionsChange({
-                          ...(selections ?? {}),
-                          [group.id]: nextValue,
-                        });
-                      } else {
-                        onSizeChange?.(nextValue);
-                      }
-                    }}
-                  >
-                    <option value="">Select {group.name.toLowerCase()}</option>
-                    {group.options.map((option) => (
-                      <option
-                        key={`${group.id}-${option.value}-${option.label}`}
-                        value={option.value}
-                      >
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <ProductOptionTiles
+                  key={group.id}
+                  name={group.name}
+                  compact
+                  disabled={disabled || group.options.length === 0}
+                  options={tileOptions}
+                  value={value}
+                  onChange={(nextValue) => {
+                    if (onSelectionsChange) {
+                      onSelectionsChange({
+                        ...(selections ?? {}),
+                        [group.id]: nextValue,
+                      });
+                    } else {
+                      onSizeChange?.(nextValue);
+                    }
+                  }}
+                />
               );
             })}
             {missingRequired ? (

@@ -11,6 +11,9 @@ export type DispatchMessageInput = {
   trackingUrlTemplateFallback?: string | null;
 };
 
+/**
+ * Customer/courier WhatsApp-friendly dispatch note with optional track link.
+ */
 export function buildDispatchNotificationText(
   input: DispatchMessageInput,
 ): string {
@@ -19,6 +22,7 @@ export function buildDispatchNotificationText(
     templateSnapshot: input.trackingUrlTemplate,
     templateFallback: input.trackingUrlTemplateFallback,
   });
+
   const lines = [
     "Your order has been dispatched.",
     "",
@@ -27,9 +31,14 @@ export function buildDispatchNotificationText(
     `Courier: ${input.courierName}`,
     `Dispatched: ${formatOrderDateTimeIst(input.dispatchedAt)}`,
   ];
+
   if (input.trackingNumber?.trim()) {
     lines.push("", `Tracking number: ${input.trackingNumber.trim()}`);
   }
-  if (trackingUrl) lines.push("", `Track here: ${trackingUrl}`);
+
+  if (trackingUrl) {
+    lines.push("", `Track here: ${trackingUrl}`);
+  }
+
   return lines.join("\n");
 }

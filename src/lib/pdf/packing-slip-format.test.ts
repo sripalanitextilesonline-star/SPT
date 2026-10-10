@@ -3,6 +3,7 @@ import {
   PACKING_SLIP_BRAND,
   PACKING_SLIP_THANKS,
   formatPackingSlipDate,
+  formatPackingSlipInternalRef,
   formatPackingSlipOrderHeading,
   formatPackingSlipQuantity,
   buildPackingSlipRecipientLines,
@@ -14,6 +15,11 @@ describe("packing slip format (Sri Palani Textiles)", () => {
   it("prints quantity as 1 of 1", () => {
     expect(formatPackingSlipQuantity(1)).toBe("1 of 1");
     expect(formatPackingSlipQuantity(3)).toBe("3 of 3");
+  });
+
+  it("prints the internal ref line with the SPT prefix", () => {
+    expect(formatPackingSlipInternalRef("26090001")).toBe("Ref #SPT26090001");
+    expect(formatPackingSlipInternalRef(null)).toBeNull();
   });
 
   it("prints Order # heading", () => {
@@ -88,17 +94,12 @@ describe("packing slip format (Sri Palani Textiles)", () => {
     const lines = resolvePackingSlipShopAddressLines({
       isEnabled: true,
       value: {
-        addressLines: [
-          "5/262, K.K. Nagar Keel Road",
-          "Edanganasalai P.O, Elampillai",
-          "Salem D.T – 637502, Tamil Nadu",
-          "India",
-        ],
+        addressLines: ["12, Main Road", "Salem-636001", "Tamil Nadu", "India"],
       },
     });
     const footer = buildPackingSlipShopFooter(lines);
     expect(footer.address).toBe(
-      "5/262, K.K. Nagar Keel Road, Edanganasalai P.O, Elampillai, Salem D.T – 637502, Tamil Nadu, India",
+      "12, Main Road, Salem-636001, Tamil Nadu, India",
     );
   });
 

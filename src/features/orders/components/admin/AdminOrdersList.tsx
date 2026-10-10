@@ -16,15 +16,10 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import type { AdminOrderListView } from "@/lib/admin/getAdminOrdersList";
-import {
-  adminOrderToPdfLabel,
-  adminOrderToPackingSlip,
-} from "@/lib/pdf/admin-order-pdf-label";
-import {
-  downloadOrderPdf,
-  PdfAddressTooLongError,
-} from "@/lib/pdf/shipping-label-pdf";
-import { downloadOrderPdf as downloadPackingSlipPdf } from "@/lib/pdf/packing-slip-pdf";
+import { AdminOrderLinePackingMeta } from "@/features/orders/components/admin/AdminOrderLinePackingMeta";
+import { AdminCheckoutOutcomeBadge } from "@/features/orders/components/admin/AdminCheckoutOutcomeBadge";
+import { downloadAdminOrderPackingSlipPdf } from "@/lib/pdf/download-packing-slip.client";
+import { displayInternalOrderRef } from "@/lib/orders/internal-order-ref";
 import { cn, formatPrice } from "@/lib/utils";
 import { formatOrderDateTimeIst } from "@/lib/datetime/india";
 
@@ -43,7 +38,7 @@ type Props = {
   resetPageParams?: string[];
   pageSizeOptions?: number[];
   emptyMessage?: string;
-  /** Paid section only — shipping-label PDF (Software-Saree-order). */
+  /** Paid section only — packing slip PDF for printing. */
   enablePdf?: boolean;
 };
 
@@ -77,7 +72,7 @@ function paymentBadgeClass(paymentStatus: string) {
     : "border-amber-500 text-amber-700";
 }
 
-function AdminOrderRow({
+const AdminOrderRow = React.memo(function AdminOrderRow({
   order,
   enablePdf,
 }: {
@@ -86,7 +81,6 @@ function AdminOrderRow({
 }) {
   const { toast } = useToast();
   const [downloadingPdf, setDownloadingPdf] = React.useState(false);
-  const [downloadingSlip, setDownloadingSlip] = React.useState(false);
 
   const copyAddress = async (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -114,18 +108,13 @@ function AdminOrderRow({
 
     setDownloadingPdf(true);
     try {
-      await downloadOrderPdf(adminOrderToPdfLabel(order));
+      await downloadAdminOrderPackingSlipPdf(order);
       toast({
         title: "PDF downloaded",
-        description: "Shipping label PDF saved to your downloads.",
+        description: "Packing slip saved to your downloads.",
       });
     } catch (error) {
-      const message =
-        error instanceof PdfAddressTooLongError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "Unknown error";
+      const message = error instanceof Error ? error.message : "Unknown error";
       toast({
         title: "Failed to generate PDF",
         description: message,
@@ -136,38 +125,28 @@ function AdminOrderRow({
     }
   };
 
-  const downloadSlip = async (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (downloadingSlip) return;
-
-    setDownloadingSlip(true);
-    try {
-      await downloadPackingSlipPdf(adminOrderToPackingSlip(order));
-      toast({
-        title: "Packing slip downloaded",
-        description: "Packing slip PDF saved to your downloads.",
-      });
-    } catch (error) {
-      toast({
-        title: "Failed to generate packing slip",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setDownloadingSlip(false);
-    }
-  };
-
   return (
-    <Link
-      href={`/admin/orders/${order.id}`}
-      className="group block rounded-lg border bg-card transition-colors hover:border-primary/30 hover:bg-muted/20"
-    >
+    <div className="group rounded-lg border bg-card transition-colors hover:border-primary/30 hover:bg-muted/20">
       <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1 space-y-3">
+        <Link
+          href={`/admin/orders/${order.id}`}
+          className="min-w-0 flex-1 space-y-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
+        >
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold">#{order.id}</p>
+            {order.internalRef ? (
+              <p className="font-semibold tabular-nums">
+                Ref #{displayInternalOrderRef(order.internalRef)}
+              </p>
+            ) : null}
+            <p
+              className={
+                order.internalRef
+                  ? "text-xs text-muted-foreground"
+                  : "font-semibold"
+              }
+            >
+              #{order.id}
+            </p>
             <Badge variant="outline" className="capitalize">
               {order.orderStatus ?? "pending"}
             </Badge>
@@ -180,6 +159,9 @@ function AdminOrderRow({
             >
               {order.paymentStatus}
             </Badge>
+            {order.checkoutOutcome ? (
+              <AdminCheckoutOutcomeBadge outcome={order.checkoutOutcome} />
+            ) : null}
             <span className="text-xs text-muted-foreground">
               {formatOrderDateTimeIst(order.createdAt)}
             </span>
@@ -202,9 +184,11 @@ function AdminOrderRow({
                     <p className="line-clamp-1 font-medium">
                       {line.productName}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Code: {line.productCode ?? "—"} • Qty: {line.quantity}
-                    </p>
+                    <AdminOrderLinePackingMeta
+                      productCode={line.productCode}
+                      quantity={line.quantity}
+                      variantLabel={line.variantLabel}
+                    />
                   </div>
                 </div>
               ))
@@ -217,47 +201,29 @@ function AdminOrderRow({
             {order.customerName ?? "Guest customer"}
             {order.customerMobile ? ` • ${order.customerMobile}` : ""}
           </p>
-        </div>
+        </Link>
 
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
           <p className="text-sm font-semibold sm:text-right">
             {formatPrice(order.amount)}
           </p>
           {enablePdf ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-full sm:w-auto"
-                disabled={downloadingPdf}
-                onClick={(event) => void downloadPdf(event)}
-                title="Download shipping label PDF"
-              >
-                {downloadingPdf ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <FileDown className="mr-2 h-4 w-4" />
-                )}
-                {downloadingPdf ? "Generating…" : "Label"}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="w-full sm:w-auto"
-                disabled={downloadingSlip}
-                onClick={(event) => void downloadSlip(event)}
-                title="Download packing slip PDF"
-              >
-                {downloadingSlip ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <FileDown className="mr-2 h-4 w-4" />
-                )}
-                {downloadingSlip ? "Generating…" : "Slip"}
-              </Button>
-            </>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={downloadingPdf}
+              onClick={(event) => void downloadPdf(event)}
+              title="Download packing slip PDF"
+            >
+              {downloadingPdf ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="mr-2 h-4 w-4" />
+              )}
+              {downloadingPdf ? "Generating…" : "PDF"}
+            </Button>
           ) : null}
           <Button
             type="button"
@@ -271,9 +237,9 @@ function AdminOrderRow({
           </Button>
         </div>
       </div>
-    </Link>
+    </div>
   );
-}
+});
 
 export function AdminOrdersList({
   orders,
@@ -290,6 +256,7 @@ export function AdminOrdersList({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isPaging, startPagingTransition] = React.useTransition();
 
   const pushQueryParams = React.useCallback(
     (next: Record<string, string | null>) => {
@@ -299,9 +266,11 @@ export function AdminOrdersList({
         else params.set(key, value);
       });
       const qs = params.toString();
-      router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      startPagingTransition(() => {
+        router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      });
     },
-    [pathname, router, searchParams],
+    [pathname, router, searchParams, startPagingTransition],
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -341,7 +310,10 @@ export function AdminOrdersList({
   const rangeEnd = Math.min(start + orders.length, totalCount);
 
   return (
-    <div className="space-y-3">
+    <div
+      className={cn("space-y-3", isPaging && "opacity-70")}
+      aria-busy={isPaging}
+    >
       {orders.map((order) => (
         <AdminOrderRow key={order.id} order={order} enablePdf={enablePdf} />
       ))}

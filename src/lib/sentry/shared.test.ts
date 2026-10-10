@@ -3,6 +3,8 @@ import {
   getSentryEnvironment,
   getTracesSampleRate,
   isSentryEnabled,
+  isSentryClientNoiseMessage,
+  shouldDropSentryClientEvent,
 } from "@/lib/sentry/shared";
 
 function setEnv(key: string, value: string | undefined) {
@@ -69,5 +71,102 @@ describe("sentry shared helpers", () => {
   it("prefers explicit environment labels", () => {
     setEnv("NEXT_PUBLIC_SENTRY_ENVIRONMENT", "staging");
     expect(getSentryEnvironment()).toBe("staging");
+  });
+
+  it("detects WebView and network noise messages", () => {
+    expect(
+      isSentryClientNoiseMessage(
+        "Error invoking postMessage: Java object is gone",
+      ),
+    ).toBe(true);
+    expect(
+      isSentryClientNoiseMessage("NetworkError: A network error occurred."),
+    ).toBe(true);
+    expect(isSentryClientNoiseMessage("Checkout failed")).toBe(false);
+    expect(
+      isSentryClientNoiseMessage(
+        "Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.",
+      ),
+    ).toBe(true);
+    expect(
+      isSentryClientNoiseMessage(
+        "SecurityError: Failed to read the 'localStorage' property from 'Window': Access is denied for this document.",
+      ),
+    ).toBe(true);
+    expect(
+      isSentryClientNoiseMessage(
+        "InvalidStateError: Transition was aborted because of invalid state",
+      ),
+    ).toBe(true);
+    // Next.js RSC flight abort
+    expect(isSentryClientNoiseMessage("Connection closed.")).toBe(true);
+    expect(isSentryClientNoiseMessage("Error: Connection closed.")).toBe(true);
+    expect(
+      isSentryClientNoiseMessage("write CONNECTION_CLOSED host:5432"),
+    ).toBe(false);
+  });
+
+  it("drops noisy Sentry events via beforeSend helper", () => {
+    expect(
+      shouldDropSentryClientEvent({
+        exception: {
+          values: [
+            {
+              type: "Error",
+              value: "Error invoking postMessage: Java object is gone",
+            },
+          ],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldDropSentryClientEvent({
+        exception: {
+          values: [{ type: "Error", value: "Connection closed." }],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldDropSentryClientEvent({
+        exception: { values: [{ type: "Error", value: "Real checkout bug" }] },
+      }),
+    ).toBe(false);
+    expect(
+      shouldDropSentryClientEvent({
+        exception: {
+          values: [
+            {
+              type: "TypeError",
+              value: "Cannot read properties of undefined (reading 'call')",
+              stacktrace: {
+                frames: [
+                  { filename: "app:///_next/static/chunks/webpack-abc.js" },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldDropSentryClientEvent({
+        exception: {
+          values: [
+            {
+              type: "TypeError",
+              value: "Cannot read properties of undefined (reading 'call')",
+              stacktrace: {
+                frames: [
+                  {
+                    filename:
+                      "app:///src/features/carts/hooks/useCartActions.tsx",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
   });
 });

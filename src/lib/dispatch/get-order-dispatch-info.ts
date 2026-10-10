@@ -13,6 +13,7 @@ export type OrderDispatchInfo = {
   trackingUrlTemplate: string | null;
 };
 
+/** Load the active dispatch record for an order (at most one per order). */
 export async function getOrderDispatchInfo(
   orderId: string,
 ): Promise<OrderDispatchInfo | null> {
@@ -33,19 +34,24 @@ export async function getOrderDispatchInfo(
     )
     .where(eq(orderDispatchEvents.orderId, orderId))
     .limit(1);
+
   const row = rows[0];
   if (!row) return null;
+
+  const dispatchedAt = new Date(row.dispatchedAt).toISOString();
+  const trackingUrl = resolveCourierTrackingUrl({
+    trackingNumber: row.trackingNumber,
+    templateSnapshot: row.trackingUrlTemplate,
+    templateFallback: row.liveTemplate,
+  });
+
   return {
     id: row.id,
     courierId: row.courierId,
     courierName: row.courierName,
     trackingNumber: row.trackingNumber,
-    dispatchedAt: new Date(row.dispatchedAt).toISOString(),
-    trackingUrl: resolveCourierTrackingUrl({
-      trackingNumber: row.trackingNumber,
-      templateSnapshot: row.trackingUrlTemplate,
-      templateFallback: row.liveTemplate,
-    }),
+    dispatchedAt,
+    trackingUrl,
     trackingUrlTemplate: row.trackingUrlTemplate ?? row.liveTemplate ?? null,
   };
 }

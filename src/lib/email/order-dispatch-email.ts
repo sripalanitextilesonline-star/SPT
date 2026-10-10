@@ -1,115 +1,101 @@
-import { siteConfig } from "@/config/site";
 import { createOrderAccessToken } from "@/lib/auth/order-access-token";
+import { siteConfig } from "@/config/site";
+import { loadOrderConfirmationInput } from "@/lib/email/order-confirmation-email";
 import {
   buildOrderDispatchHtml,
   buildOrderDispatchPlainText,
   buildOrderDispatchSubject,
   type OrderDispatchEmailInput,
-} from "./order-dispatch-content";
-import { getResendConfig } from "./resend-config";
+} from "@/lib/email/order-dispatch-content";
+import { getResendConfig } from "@/lib/email/resend-config";
 import { mergePaymentMeta, readPaymentMeta } from "@/lib/orders/payment-meta";
-import {
-  resolveOrderLineImageAlt,
-  resolveOrderLineImageKey,
-  resolveOrderLineProductCode,
-  resolveOrderLineProductName,
-} from "@/lib/orders/order-line-display";
 import db from "@/lib/supabase/db";
-import {
-  address,
-  orderLines,
-  orders,
-  type SelectOrders,
-} from "@/lib/supabase/schema";
+import { orders, type SelectOrders } from "@/lib/supabase/schema";
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
-import { keytoUrl } from "@/lib/utils";
 
-type DispatchDetails = {
-  courierName: string;
-  trackingNumber: string | null;
-  trackingUrl: string | null;
-  dispatchedAt: string;
+export type OrderDispatchEmailResult = {
+  sent: boolean;
+  skipped?: "not_configured" | "already_notified" | "no_email" | "error";
+  error?: string;
 };
+
+function buildOrderUrl(order: Pick<SelectOrders, "id" | "createdAt">): string {
+  const token = createOrderAccessToken(order.id, order.createdAt);
+  const base = siteConfig.url.replace(/\/$/, "");
+  return `${base}/orders/${order.id}?token=${encodeURIComponent(token)}`;
+}
 
 export async function loadOrderDispatchInput(
   order: SelectOrders,
-  dispatch: DispatchDetails,
+  dispatch: {
+    courierName: string;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+    dispatchedAt: string;
+  },
 ): Promise<OrderDispatchEmailInput | null> {
-  const email = order.email?.trim();
-  if (!email) return null;
-  const [addressRow] = await db
-    .select({
-      line1: address.line1,
-      line2: address.line2,
-      city: address.city,
-      state: address.state,
-      postalCode: address.postal_code,
-      country: address.country,
-    })
-    .from(orders)
-    .leftJoin(address, eq(orders.addressId, address.id))
-    .where(eq(orders.id, order.id))
-    .limit(1);
-  const lines = await db
-    .select({
-      productNameSnapshot: orderLines.productNameSnapshot,
-      productCodeSnapshot: orderLines.productCodeSnapshot,
-      productImageKeySnapshot: orderLines.productImageKeySnapshot,
-      quantity: orderLines.quantity,
-      price: orderLines.price,
-    })
-    .from(orderLines)
-    .where(eq(orderLines.orderId, order.id));
-  const token = createOrderAccessToken(order.id, order.createdAt);
+  const base = await loadOrderConfirmationInput(order);
+  if (!base) return null;
+
   return {
-    orderId: order.id,
-    customerName: order.name,
-    customerEmail: email,
-    createdAt: order.createdAt,
-    customerPhone: order.customer_mobile,
-    lineItems: lines.map((line) => {
-      const imageKey = resolveOrderLineImageKey(line);
-      const imageUrl = keytoUrl(imageKey ?? undefined);
-      return {
-        name: resolveOrderLineProductName(line),
-        quantity: line.quantity,
-        unitPrice: Number(line.price),
-        imageUrl: imageUrl.startsWith("/")
-          ? `${siteConfig.url.replace(/\/$/, "")}${imageUrl}`
-          : imageUrl,
-        imageAlt: resolveOrderLineImageAlt(line),
-        productCode: resolveOrderLineProductCode(line),
-      };
-    }),
-    shippingAddress: addressRow ?? null,
-    orderUrl: `${siteConfig.url.replace(/\/$/, "")}/orders/${order.id}?token=${encodeURIComponent(token)}`,
-    ...dispatch,
+    orderId: base.orderId,
+    internalRef: base.internalRef,
+    customerName: base.customerName,
+    customerEmail: base.customerEmail,
+    createdAt: base.createdAt,
+    customerPhone: base.customerPhone,
+    lineItems: base.lineItems,
+    shippingAddress: base.shippingAddress,
+    orderUrl: buildOrderUrl(order),
+    courierName: dispatch.courierName,
+    trackingNumber: dispatch.trackingNumber,
+    trackingUrl: dispatch.trackingUrl,
+    dispatchedAt: dispatch.dispatchedAt,
+    paymentMeta: base.paymentMeta,
   };
 }
 
 export async function notifyOrderDispatchEmail(
   order: SelectOrders,
-  dispatch: DispatchDetails,
-) {
+  dispatch: {
+    courierName: string;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+    dispatchedAt: string;
+  },
+): Promise<OrderDispatchEmailResult> {
   const config = getResendConfig();
-  if (!config) return { sent: false, skipped: "not_configured" as const };
+  if (!config) {
+    return { sent: false, skipped: "not_configured" };
+  }
+
   const meta = readPaymentMeta(order.payment_meta);
   if (meta.dispatchEmailNotified === true) {
-    return { sent: false, skipped: "already_notified" as const };
+    return { sent: false, skipped: "already_notified" };
   }
+
   const input = await loadOrderDispatchInput(order, dispatch);
-  if (!input) return { sent: false, skipped: "no_email" as const };
+  if (!input) {
+    return { sent: false, skipped: "no_email" };
+  }
+
+  const resend = new Resend(config.apiKey);
+
   try {
-    const response = await new Resend(config.apiKey).emails.send({
+    const response = await resend.emails.send({
       from: config.fromEmail,
       to: input.customerEmail,
-      subject: buildOrderDispatchSubject(input.orderId),
+      subject: buildOrderDispatchSubject(input.orderId, input.internalRef),
       html: buildOrderDispatchHtml(input),
       text: buildOrderDispatchPlainText(input),
-      replyTo: siteConfig.email || undefined,
+      replyTo: siteConfig.email,
     });
-    if (response.error) throw new Error(response.error.message);
+
+    if (response.error) {
+      throw new Error(response.error.message || "Resend send failed");
+    }
+
     await db
       .update(orders)
       .set({
@@ -120,10 +106,13 @@ export async function notifyOrderDispatchEmail(
         }),
       })
       .where(eq(orders.id, order.id));
+
     return { sent: true };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Order dispatch email failed";
+    console.warn("[email] order dispatch failed:", message);
+
     await db
       .update(orders)
       .set({
@@ -133,6 +122,7 @@ export async function notifyOrderDispatchEmail(
         }),
       })
       .where(eq(orders.id, order.id));
-    return { sent: false, skipped: "error" as const, error: message };
+
+    return { sent: false, skipped: "error", error: message };
   }
 }

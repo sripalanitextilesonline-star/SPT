@@ -1,4 +1,4 @@
-import { invalidateStorefrontCache } from "@/lib/cache/invalidate-storefront";
+import { invalidateProductCaches } from "@/lib/cache/invalidate-storefront";
 import {
   getIntegrationSetting,
   INTEGRATION_KEYS,
@@ -48,6 +48,8 @@ async function loadFulfillmentLines(
     .select({
       productId: orderLines.productId,
       quantity: orderLines.quantity,
+      size: orderLines.size,
+      selections: orderLines.selections,
     })
     .from(orderLines)
     .where(eq(orderLines.orderId, orderId));
@@ -55,8 +57,13 @@ async function loadFulfillmentLines(
   return lines.map((line) => ({
     productId: line.productId,
     quantity: line.quantity,
-    ...(selectedSizes[line.productId]
-      ? { size: selectedSizes[line.productId] }
+    ...(line.size
+      ? { size: String(line.size).trim().toUpperCase() }
+      : selectedSizes[line.productId]
+        ? { size: selectedSizes[line.productId] }
+        : {}),
+    ...(line.selections && typeof line.selections === "object"
+      ? { selections: line.selections as Record<string, string> }
       : {}),
   }));
 }
@@ -180,6 +187,8 @@ export async function fulfillPaidOrderInventory(
     })
     .where(eq(orders.id, order.id));
 
-  await invalidateStorefrontCache();
+  await invalidateProductCaches({
+    productIds: lines.map((line) => line.productId),
+  });
   return { fulfilled: true };
 }

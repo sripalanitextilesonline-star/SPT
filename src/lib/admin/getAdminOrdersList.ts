@@ -1,4 +1,11 @@
 import { buildShippingAddressCopyText } from "@/lib/orders/shipping-address-text";
+import { resolveCheckoutOutcome } from "@/lib/checkout/checkout-outcome";
+import type { CheckoutOutcome } from "@/lib/checkout/checkout-outcome";
+import { formatOrderLineVariant } from "@/lib/orders/order-line-display";
+import {
+  getProductSizeConfigsByProductIds,
+  optionGroupDisplayNames,
+} from "@/lib/products/sizeConfig";
 import db from "@/lib/supabase/db";
 import {
   address,
@@ -8,7 +15,18 @@ import {
   products,
 } from "@/lib/supabase/schema";
 import { keytoUrl } from "@/lib/utils";
-import { desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  like,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import { buildAdminOrderSearchTerms } from "@/lib/admin/admin-order-search";
 import {
   clampAdminOrdersPageSize,
   type AdminOrdersSegment,
@@ -28,16 +46,19 @@ export type AdminOrderLineView = {
   quantity: number;
   productName: string;
   productCode: string | null;
+  variantLabel: string | null;
   imageUrl: string;
   imageAlt: string;
 };
 
 export type AdminOrderListView = {
   id: string;
+  internalRef: string | null;
   createdAt: string;
   amount: number;
   orderStatus: string | null;
   paymentStatus: string;
+  checkoutOutcome: CheckoutOutcome | null;
   customerName: string | null;
   customerMobile: string | null;
   shippingAddress: {
@@ -56,6 +77,8 @@ export type AdminOrdersListParams = {
   segment: AdminOrdersSegment;
   page?: number;
   pageSize?: number;
+  /** Order id, internal ref (SPT prefix optional), customer name or mobile; partial matches. */
+  query?: string;
 };
 
 export type AdminOrdersListResult = {
@@ -82,6 +105,22 @@ function buildSegmentWhereClause(segment: AdminOrdersSegment): SQL {
   return sql`${orderStatus} <> 'cancelled' and (${orderStatus} = 'pending' or ${paymentStatus} in ('unpaid', 'pending', 'failed'))`;
 }
 
+function buildSearchWhereClause(query: string | undefined): SQL | undefined {
+  const terms = buildAdminOrderSearchTerms(query);
+  if (!terms) return undefined;
+  const matches: SQL[] = [ilike(orders.id, terms.idPattern)];
+  if (terms.refPattern) {
+    matches.push(ilike(orders.internal_ref, terms.refPattern));
+  }
+  if (terms.namePattern) {
+    matches.push(ilike(orders.name, terms.namePattern));
+  }
+  if (terms.mobilePattern) {
+    matches.push(like(orders.customer_mobile, terms.mobilePattern));
+  }
+  return or(...matches);
+}
+
 async function countOrders(where: SQL): Promise<number> {
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -90,14 +129,24 @@ async function countOrders(where: SQL): Promise<number> {
   return Number(rows[0]?.count ?? 0);
 }
 
-/** Counts for the summary cards — cheap aggregate queries, no row payloads. */
-export async function getAdminOrdersCounts(): Promise<{
+/** Counts for the summary cards — one aggregate round-trip, no row payloads. */
+export async function getAdminOrdersCounts(query?: string): Promise<{
   paid: number;
   pending: number;
 }> {
-  const paid = await countOrders(buildSegmentWhereClause("paid"));
-  const pending = await countOrders(buildSegmentWhereClause("pending"));
-  return { paid, pending };
+  const paymentStatus = sql`lower(trim(${orders.payment_status}))`;
+  const orderStatus = sql`lower(trim(coalesce(${orders.order_status}, '')))`;
+  const rows = await db
+    .select({
+      paid: sql<number>`count(*) filter (where ${paymentStatus} in ('paid', 'success', 'captured'))::int`,
+      pending: sql<number>`count(*) filter (where ${orderStatus} <> 'cancelled' and (${orderStatus} = 'pending' or ${paymentStatus} in ('unpaid', 'pending', 'failed')))::int`,
+    })
+    .from(orders)
+    .where(buildSearchWhereClause(query));
+  return {
+    paid: Number(rows[0]?.paid ?? 0),
+    pending: Number(rows[0]?.pending ?? 0),
+  };
 }
 
 async function loadOrderLinesByOrderId(
@@ -111,6 +160,9 @@ async function loadOrderLinesByOrderId(
       id: orderLines.id,
       orderId: orderLines.orderId,
       quantity: orderLines.quantity,
+      size: orderLines.size,
+      selections: orderLines.selections,
+      productId: orderLines.productId,
       productName: products.name,
       productCode: products.productCode,
       imageKey: medias.key,
@@ -121,12 +173,32 @@ async function loadOrderLinesByOrderId(
     .leftJoin(medias, eq(products.featuredImageId, medias.id))
     .where(inArray(orderLines.orderId, orderIds));
 
+  const productIds = [
+    ...new Set(
+      lineRows
+        .map((row) => row.productId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const sizeConfigs =
+    productIds.length > 0
+      ? await getProductSizeConfigsByProductIds(productIds)
+      : new Map();
+
   for (const row of lineRows) {
+    const groupNames = row.productId
+      ? optionGroupDisplayNames(sizeConfigs.get(row.productId))
+      : undefined;
     const line: AdminOrderLineView = {
       id: row.id,
       quantity: row.quantity,
       productName: row.productName || "Product",
       productCode: row.productCode ?? null,
+      variantLabel: formatOrderLineVariant({
+        size: row.size,
+        selections: row.selections as Record<string, unknown> | null,
+        groupNames,
+      }),
       imageUrl: keytoUrl(row.imageKey ?? undefined),
       imageAlt: row.imageAlt || row.productName || "Product image",
     };
@@ -149,7 +221,9 @@ export async function getAdminOrdersList(
 ): Promise<AdminOrdersListResult> {
   const pageSize = clampAdminOrdersPageSize(params.pageSize);
   const requestedPage = Math.max(1, Math.round(params.page ?? 1));
-  const where = buildSegmentWhereClause(params.segment);
+  const segmentWhere = buildSegmentWhereClause(params.segment);
+  const where =
+    and(segmentWhere, buildSearchWhereClause(params.query)) ?? segmentWhere;
 
   const totalCount = await countOrders(where);
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -159,10 +233,12 @@ export async function getAdminOrdersList(
   const orderRows = await db
     .select({
       id: orders.id,
+      internalRef: orders.internal_ref,
       createdAt: orders.createdAt,
       amount: orders.amount,
       orderStatus: orders.order_status,
       paymentStatus: orders.payment_status,
+      paymentMeta: orders.payment_meta,
       customerName: orders.name,
       customerMobile: orders.customer_mobile,
       addressLine1: address.line1,
@@ -201,10 +277,15 @@ export async function getAdminOrdersList(
 
     return {
       id: row.id,
+      internalRef: row.internalRef ?? null,
       createdAt: new Date(row.createdAt).toISOString(),
       amount: Number(row.amount),
       orderStatus: row.orderStatus,
       paymentStatus: row.paymentStatus,
+      checkoutOutcome: resolveCheckoutOutcome({
+        paymentStatus: row.paymentStatus,
+        paymentMeta: row.paymentMeta,
+      }),
       customerName: row.customerName,
       customerMobile: row.customerMobile,
       shippingAddress,

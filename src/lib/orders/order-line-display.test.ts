@@ -1,4 +1,5 @@
 import {
+  formatOrderLineVariant,
   resolveOrderLineImageKey,
   resolveOrderLineProductCode,
   resolveOrderLineProductName,
@@ -35,5 +36,25 @@ describe("order-line-display", () => {
         productCodeSnapshot: "SSR-001",
       }),
     ).toBe("SSR-001");
+  });
+
+  it("formats variant from selections or legacy size", () => {
+    expect(
+      formatOrderLineVariant({
+        selections: { color: "RED", size: "10CM" },
+      }),
+    ).toBe("Color: RED • Size: 10CM");
+
+    expect(formatOrderLineVariant({ size: "M" })).toBe("Size: M");
+
+    expect(formatOrderLineVariant({ size: null, selections: {} })).toBeNull();
+
+    expect(
+      formatOrderLineVariant({
+        size: "10CM",
+        selections: { group_mszou8qd_l9ttz: "10CM" },
+        groupNames: { group_mszou8qd_l9ttz: "Size" },
+      }),
+    ).toBe("Size: 10CM");
   });
 });

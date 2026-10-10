@@ -1,13 +1,28 @@
+import { getLocallyVerifiedUser } from "@/lib/auth/local-jwt";
+import { classifyAuthCookies } from "@/lib/auth/middleware-session-cookie";
 import createServerClient from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import type { User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { cache } from "react";
 
+function isDynamicServerUsageError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { digest?: string }).digest === "DYNAMIC_SERVER_USAGE"
+  );
+}
+
 /** Read session in Server Components / layouts (not a server action). */
 export const getSessionUser = cache(async (): Promise<User | null> => {
   try {
     const cookieStore = await cookies();
+    const allCookies = cookieStore.getAll();
+    const localUser = await getLocallyVerifiedUser(allCookies);
+    if (localUser) return localUser;
+    if (classifyAuthCookies(allCookies) !== "refreshable") return null;
+
     const supabase = createServerClient({ cookieStore });
     const { data, error } = await supabase.auth.getUser();
     if (error) {
@@ -16,7 +31,9 @@ export const getSessionUser = cache(async (): Promise<User | null> => {
     }
     return data.user ?? null;
   } catch (err) {
-    console.error("[auth] getSessionUser failed:", err);
+    if (!isDynamicServerUsageError(err)) {
+      console.error("[auth] getSessionUser failed:", err);
+    }
     return null;
   }
 });

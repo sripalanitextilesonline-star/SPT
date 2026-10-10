@@ -4,6 +4,7 @@ import { CollectionBanner } from "@/features/collections";
 import { SearchProductsGridSkeleton } from "@/features/products";
 import {
   FilterSelections,
+  ListingFilterNavigationProvider,
   SearchProductsInifiteScroll,
 } from "@/features/search";
 import { getCollectionPageCached } from "@/lib/storefront/collection-detail";
@@ -16,7 +17,10 @@ import {
 } from "@/lib/storefront/product-queries";
 import { buildShopSearchVariables } from "@/lib/storefront/search-params";
 import { getProductPackLabelsByIds } from "@/lib/products/pack.server";
+import { getProductSizePreviewsByIds } from "@/lib/products/sizeConfig";
+import { buildSocialImages } from "@/lib/seo/social-image";
 import { toTitleCase, unslugify } from "@/lib/utils";
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -31,21 +35,41 @@ interface CategoryPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: CategoryPageProps) {
+export async function generateMetadata({
+  params,
+}: CategoryPageProps): Promise<Metadata> {
   const resolvedParams = await params;
-  const collectionName = toTitleCase(unslugify(resolvedParams.collectionSlug));
   const path = `/collections/${resolvedParams.collectionSlug}`;
+  const data = await getCollectionPageCached(resolvedParams.collectionSlug);
+  const collection = data?.collectionsCollection?.edges?.[0]?.node;
+  const collectionName =
+    collection?.label?.trim() ||
+    collection?.title?.trim() ||
+    toTitleCase(unslugify(resolvedParams.collectionSlug));
+  const description =
+    collection?.description?.trim() ||
+    `Shop ${collectionName} sarees at Sri Palani Textiles. Premium handloom textiles with secure online ordering.`;
+  const social = buildSocialImages(
+    collection?.featuredImage?.key,
+    collectionName,
+  );
 
   return {
     title: `${collectionName} Sarees`,
-    description: `Shop ${collectionName} sarees at Sri Palani Textiles. Premium handloom textiles with secure online ordering.`,
+    description,
     alternates: {
       canonical: path,
     },
     openGraph: {
       title: `${collectionName} Sarees | Sri Palani Textiles`,
-      description: `Shop ${collectionName} craft supplies at Sri Palani Textiles.`,
+      description,
       url: path,
+      ...social.openGraph,
+    },
+    twitter: {
+      ...social.twitter,
+      title: `${collectionName} Sarees | Sri Palani Textiles`,
+      description,
     },
   };
 }
@@ -87,38 +111,44 @@ async function CategoryPage({ params, searchParams }: CategoryPageProps) {
     initialSearchResult?.productsCollection?.edges?.map(
       ({ node }) => node.id,
     ) ?? [];
-  const initialPackLabels = await getProductPackLabelsByIds(initialProductIds);
+  const [initialPackLabels, initialSizePreviews] = await Promise.all([
+    getProductPackLabelsByIds(initialProductIds),
+    getProductSizePreviewsByIds(initialProductIds),
+  ]);
 
   return (
     <Shell>
       <CollectionBanner collectionBannerData={collection} />
 
-      <Suspense
-        fallback={
-          <div>
-            <Skeleton className="max-w-xl h-8 mb-3" />
-            <Skeleton className="max-w-2xl h-8" />
-          </div>
-        }
-      >
-        <FilterSelections shopLayout={false} />
-      </Suspense>
-
-      {productsUnavailable ? (
-        <SectionErrorNotice
-          title="We could not load products in this collection"
-          description="This is usually temporary. Please try again in a moment."
-        />
-      ) : (
-        <Suspense fallback={<SearchProductsGridSkeleton />}>
-          <SearchProductsInifiteScroll
-            collectionId={collection.id}
-            initialSearchResult={initialSearchResult}
-            initialDraftIds={initialDraftIds ?? []}
-            initialPackLabels={initialPackLabels}
-          />
+      <ListingFilterNavigationProvider>
+        <Suspense
+          fallback={
+            <div>
+              <Skeleton className="max-w-xl h-8 mb-3" />
+              <Skeleton className="max-w-2xl h-8" />
+            </div>
+          }
+        >
+          <FilterSelections shopLayout={false} />
         </Suspense>
-      )}
+
+        {productsUnavailable ? (
+          <SectionErrorNotice
+            title="We could not load products in this collection"
+            description="This is usually temporary. Please try again in a moment."
+          />
+        ) : (
+          <Suspense fallback={<SearchProductsGridSkeleton />}>
+            <SearchProductsInifiteScroll
+              collectionId={collection.id}
+              initialSearchResult={initialSearchResult}
+              initialDraftIds={initialDraftIds ?? []}
+              initialPackLabels={initialPackLabels}
+              initialSizePreviews={initialSizePreviews}
+            />
+          </Suspense>
+        )}
+      </ListingFilterNavigationProvider>
     </Shell>
   );
 }

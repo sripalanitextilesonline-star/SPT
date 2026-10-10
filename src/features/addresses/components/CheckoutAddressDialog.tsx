@@ -17,8 +17,14 @@ import {
 } from "@/_actions/address";
 import type { SavedShippingAddress } from "../validations/addressFormSchema";
 import type { AddressFormValues } from "../validations/addressFormSchema";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { AddAddressForm } from "./AddAddressForm";
 import { AddressCard } from "./AddressCard";
+import {
+  ADDRESS_DIALOG_CONTENT_CLASS,
+  ADDRESS_DIALOG_HEADER_CLASS,
+  ADDRESS_DIALOG_SCROLL_CLASS,
+} from "./address-dialog-layout";
 import {
   isAddressCompleteForCheckout,
   pickDefaultAddressId,
@@ -26,10 +32,11 @@ import {
 } from "../lib/userAddress";
 import type { UserAddressRecord } from "../lib/userAddress";
 import type { CheckoutProgressUpdate } from "@/features/checkout/checkout-progress";
+import { savingAddressProgress } from "@/features/checkout/checkout-progress";
 import {
-  creatingOrderProgress,
-  savingAddressProgress,
-} from "@/features/checkout/checkout-progress";
+  formatCheckoutErrorMessage,
+  isCheckoutPaymentCancelled,
+} from "@/features/checkout/format-checkout-error";
 import CheckoutTermsNotice from "@/components/layouts/CheckoutTermsNotice";
 
 type Props = {
@@ -135,20 +142,24 @@ export function CheckoutAddressDialog({
     }
 
     setIsSubmitting(true);
-    onProgress?.(creatingOrderProgress());
     try {
       const shipping = await getSavedShippingAddress(selectedId);
-      // Close first so Cashfree/checkout overlay isn't blocked by the dialog.
-      onOpenChange(false);
-      await new Promise((resolve) => setTimeout(resolve, 150));
       await onComplete(shipping);
     } catch (err) {
       onCheckoutError?.();
-      toast({
-        title: "Checkout failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
+      if (isCheckoutPaymentCancelled(err)) {
+        toast({
+          title: "Payment not completed",
+          description: "You can try again when ready.",
+        });
+      } else {
+        toast({
+          title: "Checkout failed",
+          description: formatCheckoutErrorMessage(err),
+          variant: "destructive",
+        });
+      }
+      // Handled via toast — do not rethrow (avoids Sentry unhandledrejection noise).
     } finally {
       setIsSubmitting(false);
     }
@@ -163,17 +174,22 @@ export function CheckoutAddressDialog({
         guest ? null : userId ?? null,
         { setAsDefault: !guest && addresses.length === 0 },
       );
-      onOpenChange(false);
-      await new Promise((resolve) => setTimeout(resolve, 150));
       await onComplete(saved);
     } catch (err) {
       onCheckoutError?.();
-      toast({
-        title: "Checkout failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-      throw err;
+      if (isCheckoutPaymentCancelled(err)) {
+        toast({
+          title: "Payment not completed",
+          description: "You can try again when ready.",
+        });
+      } else {
+        toast({
+          title: "Checkout failed",
+          description: formatCheckoutErrorMessage(err),
+          variant: "destructive",
+        });
+      }
+      // Handled via toast — do not rethrow (avoids Sentry unhandledrejection noise).
     } finally {
       setIsSubmitting(false);
     }
@@ -197,6 +213,7 @@ export function CheckoutAddressDialog({
         : "Add delivery address";
 
   const busy = isSubmitting || checkoutLocked;
+  useKeyboardInset(open);
   const activeProgressMessage =
     progressMessage ??
     (isSubmitting ? "Processing your details…" : submitLabel);
@@ -209,14 +226,17 @@ export function CheckoutAddressDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="left-0 top-0 z-[190] flex h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:left-1/2 sm:top-1/2 sm:h-auto sm:max-h-[min(90dvh,860px)] sm:w-[min(92vw,780px)] sm:max-w-[780px] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:border">
-        <DialogHeader className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 text-left backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:px-6 sm:py-4">
+      <DialogContent
+        hideCloseButton={busy}
+        className={ADDRESS_DIALOG_CONTENT_CLASS}
+      >
+        <DialogHeader className={ADDRESS_DIALOG_HEADER_CLASS}>
           <DialogTitle className="text-lg font-semibold sm:text-xl">
             {title}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 sm:py-4">
+        <div className={ADDRESS_DIALOG_SCROLL_CLASS}>
           {loadingAddresses ? (
             <div className="flex items-center justify-center py-16">
               <Spinner className="h-6 w-6 animate-spin" />
@@ -260,7 +280,7 @@ export function CheckoutAddressDialog({
               submitLabel={submitLabel}
               submittingMessage={activeProgressMessage}
               defaultValues={formDefaults}
-              persistDraft={guest}
+              persistDraft
               dialogOpen={open}
               checkoutQuantity={checkoutQuantity}
               disabled={busy}

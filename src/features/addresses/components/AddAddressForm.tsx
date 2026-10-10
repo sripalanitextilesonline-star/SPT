@@ -1,7 +1,14 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type FocusEvent,
+  type KeyboardEvent,
+} from "react";
 import { useForm } from "react-hook-form";
 import {
   mergeCheckoutAddressDefaults,
@@ -38,6 +45,27 @@ type Props = {
   checkoutQuantity?: number;
   disabled?: boolean;
 };
+
+/** Inputs the user can actually type into, in DOM order (skips read-only State). */
+const TYPEABLE_INPUT_SELECTOR =
+  'input:not([type="hidden"]):not([readonly]):not([disabled]):not([tabindex="-1"])';
+
+function getTypeableInputs(form: HTMLFormElement): HTMLInputElement[] {
+  return Array.from(
+    form.querySelectorAll<HTMLInputElement>(TYPEABLE_INPUT_SELECTOR),
+  );
+}
+
+/** Mobile-only: full-screen dialog + soft keyboard. sm+ dialog is centered and short. */
+function isMobileFormViewport() {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 639px)").matches
+  );
+}
+
+/** Soft keyboard animation is ~250ms; scroll after it settles. */
+const KEYBOARD_SETTLE_MS = 280;
 
 function RequiredLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -117,6 +145,51 @@ export function AddAddressForm({
     }
   }, [form, pincodeLookup.result, pincodeLookup.status]);
 
+  /**
+   * In-app browsers (Instagram / Facebook WebView) keep the layout viewport
+   * full-height under the soft keyboard, so the browser's own "scroll focused
+   * input into view" is unreliable. Center the focused field ourselves once
+   * the keyboard has settled.
+   */
+  const focusScrollTimer = useRef<number | null>(null);
+  const handleFocusCapture = useCallback(
+    (event: FocusEvent<HTMLFormElement>) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!isMobileFormViewport()) return;
+      if (focusScrollTimer.current)
+        window.clearTimeout(focusScrollTimer.current);
+      focusScrollTimer.current = window.setTimeout(() => {
+        if (document.activeElement !== target) return;
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, KEYBOARD_SETTLE_MS);
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (focusScrollTimer.current)
+        window.clearTimeout(focusScrollTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * Keyboard "→ / Next" is Enter. Implicit form submission on Enter would run
+   * validation and show errors on fields hidden behind the keyboard. Move focus
+   * to the next field instead; only the last field submits.
+   */
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Enter") return;
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const inputs = getTypeableInputs(event.currentTarget);
+    const index = inputs.indexOf(target);
+    if (index === -1 || index === inputs.length - 1) return;
+    event.preventDefault();
+    inputs[index + 1]?.focus();
+  }, []);
+
   const localityLabel =
     pincodeLookup.status === "ready" && pincodeLookup.result
       ? [
@@ -131,6 +204,8 @@ export function AddAddressForm({
     <Form {...form}>
       <form
         onSubmit={form.handleSubmit(onSubmit)}
+        onFocusCapture={handleFocusCapture}
+        onKeyDown={handleKeyDown}
         className="space-y-3 sm:space-y-4"
         noValidate
       >
@@ -143,7 +218,12 @@ export function AddAddressForm({
                 <RequiredLabel>Full Name</RequiredLabel>
               </FormLabel>
               <FormControl>
-                <Input placeholder="Enter full name" {...field} />
+                <Input
+                  placeholder="Enter full name"
+                  autoComplete="name"
+                  enterKeyHint="next"
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -155,14 +235,13 @@ export function AddAddressForm({
           name="email"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>
-                <RequiredLabel>Email</RequiredLabel>
-              </FormLabel>
+              <FormLabel>Email</FormLabel>
               <FormControl>
                 <Input
                   type="email"
                   placeholder="Enter email"
                   autoComplete="email"
+                  enterKeyHint="next"
                   {...field}
                 />
               </FormControl>
@@ -185,6 +264,7 @@ export function AddAddressForm({
                   inputMode="numeric"
                   placeholder="Enter mobile number"
                   autoComplete="tel"
+                  enterKeyHint="next"
                   maxLength={10}
                   {...field}
                   onChange={(e) => {
@@ -213,6 +293,7 @@ export function AddAddressForm({
                   placeholder="6-digit PIN code"
                   inputMode="numeric"
                   autoComplete="postal-code"
+                  enterKeyHint="next"
                   maxLength={6}
                   {...field}
                   onChange={(e) => {
@@ -257,6 +338,7 @@ export function AddAddressForm({
                   <Input
                     placeholder="Filled from PIN"
                     autoComplete="address-level2"
+                    enterKeyHint="next"
                     {...field}
                   />
                 </FormControl>
@@ -277,11 +359,14 @@ export function AddAddressForm({
                   <Input
                     {...field}
                     readOnly
+                    tabIndex={-1}
+                    aria-readonly="true"
                     placeholder="Filled from PIN"
                     autoComplete="address-level1"
-                    className="bg-muted/40"
+                    className="cursor-default bg-muted/50 text-muted-foreground pointer-events-none"
                   />
                 </FormControl>
+                <p className="text-xs text-muted-foreground">Filled from PIN</p>
                 <FormMessage />
               </FormItem>
             )}
@@ -300,22 +385,9 @@ export function AddAddressForm({
                 <Input
                   placeholder="House / street / landmark"
                   autoComplete="street-address"
+                  enterKeyHint="done"
                   {...field}
                 />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="line2"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Address Line 2</FormLabel>
-              <FormControl>
-                <Input placeholder="Optional" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>

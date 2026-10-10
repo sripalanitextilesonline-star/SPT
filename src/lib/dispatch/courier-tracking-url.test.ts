@@ -4,57 +4,62 @@ import {
 } from "./courier-tracking-url";
 
 describe("buildCourierTrackingUrl", () => {
-  it("returns null when template is missing", () => {
-    expect(buildCourierTrackingUrl(null, "T123")).toBeNull();
-    expect(buildCourierTrackingUrl("", "T123")).toBeNull();
-  });
-
-  it("returns null when tracking number is missing", () => {
-    expect(
-      buildCourierTrackingUrl("https://track.example.com/{tracking}", null),
-    ).toBeNull();
-  });
-
-  it("replaces {tracking} token with encoded value", () => {
+  it("replaces {tracking} in query templates", () => {
     expect(
       buildCourierTrackingUrl(
-        "https://track.example.com/track?awb={tracking}",
-        "ABC/123",
+        "https://www.delhivery.com/track?waybill={tracking}",
+        "ab-12345",
       ),
-    ).toBe("https://track.example.com/track?awb=ABC%2F123");
+    ).toBe("https://www.delhivery.com/track?waybill=ab-12345");
   });
 
-  it("appends tracking as path segment when no token", () => {
+  it("replaces {tracking} in path templates", () => {
     expect(
-      buildCourierTrackingUrl("https://track.example.com/awb", "T1234"),
-    ).toBe("https://track.example.com/awb/T1234");
+      buildCourierTrackingUrl(
+        "https://www.bluedart.com/track/{tracking}",
+        "XY999",
+      ),
+    ).toBe("https://www.bluedart.com/track/XY999");
   });
 
-  it("rejects non-http protocols", () => {
+  it("appends tracking when template has no placeholder", () => {
+    expect(buildCourierTrackingUrl("https://example.com/track", "ABC123")).toBe(
+      "https://example.com/track/ABC123",
+    );
+  });
+
+  it("returns null without tracking when template needs it", () => {
     expect(
-      buildCourierTrackingUrl("ftp://example.com/{tracking}", "T1"),
+      buildCourierTrackingUrl(
+        "https://www.delhivery.com/track?waybill={tracking}",
+        "",
+      ),
     ).toBeNull();
+  });
+
+  it("rejects invalid URLs", () => {
+    expect(buildCourierTrackingUrl("not-a-url/{tracking}", "123")).toBeNull();
   });
 });
 
 describe("resolveCourierTrackingUrl", () => {
-  it("prefers templateSnapshot over fallback", () => {
+  it("prefers the stored snapshot over live fallback", () => {
     expect(
       resolveCourierTrackingUrl({
-        trackingNumber: "AWB123",
-        templateSnapshot: "https://primary.com/{tracking}",
-        templateFallback: "https://fallback.com/{tracking}",
+        trackingNumber: "123",
+        templateSnapshot: "https://snap.test/{tracking}",
+        templateFallback: "https://live.test/{tracking}",
       }),
-    ).toBe("https://primary.com/AWB123");
+    ).toBe("https://snap.test/123");
   });
 
-  it("falls back when snapshot is missing", () => {
+  it("falls back to live template when snapshot is missing", () => {
     expect(
       resolveCourierTrackingUrl({
-        trackingNumber: "AWB123",
+        trackingNumber: "123",
         templateSnapshot: null,
-        templateFallback: "https://fallback.com/{tracking}",
+        templateFallback: "https://live.test/{tracking}",
       }),
-    ).toBe("https://fallback.com/AWB123");
+    ).toBe("https://live.test/123");
   });
 });

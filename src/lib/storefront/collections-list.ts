@@ -1,9 +1,16 @@
-import { CollectionCardFragment } from "@/features/collections";
+import "server-only";
+
+import { CollectionCardFragment } from "@/features/collections/components/CollectionsCard";
 import type { AllCollectionsQueryQuery } from "@/gql/graphql";
 import { gql } from "@/gql";
 import { CACHE_TAGS } from "@/lib/cache/constants";
 import { withStorefrontCache } from "@/lib/cache/storefront-cache";
 import { getClient } from "@/lib/urql";
+import {
+  fetchD1Collections,
+  isCatalogD1Enabled,
+} from "@/lib/catalog/d1-mirror";
+import { mapD1CollectionsToConnection } from "@/lib/catalog/d1-product-card";
 
 const AllCollectionsQuery = gql(/* GraphQL */ `
   query AllCollectionsQuery {
@@ -21,7 +28,7 @@ const AllCollectionsQuery = gql(/* GraphQL */ `
   }
 `);
 
-export async function getAllCollectionsCached(): Promise<
+async function fetchAllCollectionsFromSupabase(): Promise<
   AllCollectionsQueryQuery["collectionsCollection"] | null
 > {
   return withStorefrontCache(
@@ -37,3 +44,28 @@ export async function getAllCollectionsCached(): Promise<
     { revalidate: 300, tags: [CACHE_TAGS.collections] },
   );
 }
+
+export async function getAllCollectionsCached(): Promise<
+  AllCollectionsQueryQuery["collectionsCollection"] | null
+> {
+  if (isCatalogD1Enabled()) {
+    try {
+      const collections = await fetchD1Collections();
+      if (collections.length > 0) {
+        return mapD1CollectionsToConnection(
+          collections,
+        ) as unknown as AllCollectionsQueryQuery["collectionsCollection"];
+      }
+    } catch (error) {
+      console.warn(
+        "[catalog-d1] collections fallback to supabase:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  return fetchAllCollectionsFromSupabase();
+}
+
+// Keep fragment document referenced for gql registration.
+void CollectionCardFragment;

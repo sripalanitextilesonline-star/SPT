@@ -24,7 +24,7 @@ export async function uploadMediaToR2(
       ContentType: contentType,
       CacheControl: "public, max-age=31536000, immutable",
     },
-    { auth: options?.auth },
+    { auth: options?.auth ?? "admin-session" },
   );
 
   return key;

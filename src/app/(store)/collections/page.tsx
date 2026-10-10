@@ -2,9 +2,12 @@ import Header from "@/components/layouts/Header";
 import { Shell } from "@/components/layouts/Shell";
 import CollectionsCard from "@/features/collections/components/CollectionsCard";
 import { getAllCollectionsCached } from "@/lib/storefront/collections-list";
+import { buildSocialImages } from "@/lib/seo/social-image";
 import { Metadata } from "next";
 
 export const revalidate = 300;
+
+const collectionsSocial = buildSocialImages(null, "Sri Palani Textiles");
 
 export const metadata: Metadata = {
   title: "All Collections",
@@ -18,6 +21,13 @@ export const metadata: Metadata = {
     description:
       "Browse silk and cotton saree collections at Sri Palani Textiles.",
     url: "/collections",
+    ...collectionsSocial.openGraph,
+  },
+  twitter: {
+    ...collectionsSocial.twitter,
+    title: "All Collections | Sri Palani Textiles",
+    description:
+      "Browse silk and cotton saree collections at Sri Palani Textiles.",
   },
 };
 
@@ -27,10 +37,7 @@ export default async function AllCollectionsPage() {
 
   return (
     <Shell>
-      <Header
-        heading="Product Categories"
-        description="Browse craft supplies by collection"
-      />
+      <Header heading="Product Categories" />
 
       {collections.length === 0 ? (
         <p className="py-12 text-center text-muted-foreground">

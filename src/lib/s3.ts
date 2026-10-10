@@ -3,7 +3,12 @@ import { env } from "@/env.mjs";
 import { AwsClient } from "aws4fetch";
 
 /**
- * `admin-session` — caller must be a logged-in admin (default).
+ * Sri Palani Textiles media storage on Cloudflare R2 (bucket spt-cdn).
+ *
+ * - Browser staging: short-lived PUT to spt-media worker (skips Vercel)
+ * - Fallback: aws4fetch presigned PUT (S3 API) when proxy is unset
+ * - Worker put/get/delete: R2 binding (no S3 signature)
+ *
  * `trusted-server` — route already authenticated (e.g. Velo API key).
  */
 export type MediaWriteAuth = "admin-session" | "trusted-server";
@@ -12,16 +17,6 @@ async function assertMediaWriteAuth(auth: MediaWriteAuth = "admin-session") {
   if (auth === "trusted-server") return;
   await requireAdminActionUser();
 }
-
-/**
- * Hub media storage on Cloudflare R2.
- *
- * - Browser direct uploads: aws4fetch presigned PUT (S3 API)
- * - Worker put/get/delete: R2 binding (no S3 signature — avoids 401s from
- *   aws4fetch + global_fetch_strictly_public on Workers)
- *
- * SSR Tex uses Supabase Storage instead; Hub cannot copy that path 1:1.
- */
 
 type R2BucketLike = {
   put: (
@@ -130,23 +125,85 @@ export type PutObjectParams = {
   CacheControl?: string;
 };
 
-/** Browser staging upload — S3 presigned PUT (no Content-Type in signature). */
+/** Browser staging upload — S3/R2 presigned PUT. */
 export async function createPresignedPutUrl(params: {
   key: string;
   contentType: string;
   expiresInSeconds?: number;
+  /**
+   * When set, Content-Type + Content-Length are signed so the browser PUT
+   * must match (digital zip uploads). Omit for image staging (unsigned headers).
+   */
+  contentLength?: number;
   auth?: MediaWriteAuth;
 }) {
   await assertMediaWriteAuth(params.auth ?? "admin-session");
   const expires = params.expiresInSeconds ?? 60 * 10;
   const url = `${objectUrl(params.key)}?X-Amz-Expires=${expires}`;
 
+  const signContentHeaders =
+    typeof params.contentLength === "number" &&
+    Number.isFinite(params.contentLength) &&
+    params.contentLength > 0;
+
+  if (!signContentHeaders) {
+    const signed = await getAwsClient().sign(url, {
+      method: "PUT",
+      aws: { signQuery: true },
+    });
+    return String(signed.url);
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": params.contentType || "application/octet-stream",
+    "Content-Length": String(Math.round(params.contentLength!)),
+  };
+
   const signed = await getAwsClient().sign(url, {
     method: "PUT",
+    headers,
+    aws: {
+      signQuery: true,
+      allHeaders: true,
+    },
+  });
+
+  return String(signed.url);
+}
+
+/** Short-lived GET for a paid digital download (caller must already authorize). */
+export async function createPresignedGetUrl(params: {
+  key: string;
+  expiresInSeconds?: number;
+  fileName?: string;
+}) {
+  const expires = params.expiresInSeconds ?? 60;
+  const disposition = params.fileName
+    ? `attachment; filename="${params.fileName.replace(/"/g, "")}"`
+    : "attachment";
+  const url = `${objectUrl(params.key)}?X-Amz-Expires=${expires}&response-content-disposition=${encodeURIComponent(disposition)}`;
+
+  const signed = await getAwsClient().sign(url, {
+    method: "GET",
     aws: { signQuery: true },
   });
 
   return String(signed.url);
+}
+
+export async function statObject(
+  key: string,
+  options?: { auth?: MediaWriteAuth },
+) {
+  await assertMediaWriteAuth(options?.auth ?? "admin-session");
+  const res = await getAwsClient().fetch(objectUrl(key), { method: "HEAD" });
+  if (!res.ok) {
+    throw new Error("Uploaded file not found. Try uploading again.");
+  }
+  return {
+    size: Number(res.headers.get("content-length") || 0),
+    contentType: res.headers.get("content-type"),
+  };
 }
 
 export async function putObject(

@@ -6,6 +6,7 @@ import {
   resolveListPriceForSelection,
   serializeProductSizeConfig,
   sumSelectedOptionListPrices,
+  toProductSizePreview,
 } from "./sizeConfig-shared";
 
 describe("normalizeProductSizeConfig", () => {
@@ -184,5 +185,77 @@ describe("multi-group pricing", () => {
         preferMinWhenUnselected: true,
       }),
     ).toBe(400);
+  });
+});
+
+describe("toProductSizePreview", () => {
+  it("returns empty preview when disabled or out of stock", () => {
+    expect(
+      toProductSizePreview({
+        enabled: false,
+        options: [{ value: "XL", qty: 2 }],
+      }),
+    ).toEqual({
+      enabled: false,
+      optionName: DEFAULT_PRODUCT_OPTION_NAME,
+      labels: [],
+      groupId: "",
+      choices: [],
+      canPickOnListing: false,
+    });
+
+    expect(
+      toProductSizePreview({
+        enabled: true,
+        options: [{ value: "XL", qty: 0 }],
+      }),
+    ).toMatchObject({ enabled: false, labels: [], canPickOnListing: false });
+  });
+
+  it("formats single-group letter sizes with qty and listing choices", () => {
+    const preview = toProductSizePreview(
+      normalizeProductSizeConfig({
+        enabled: true,
+        options: [
+          { value: "S", qty: 2 },
+          { value: "XL", qty: 1 },
+        ],
+      }),
+    );
+
+    expect(preview.enabled).toBe(true);
+    expect(preview.optionName).toBe(DEFAULT_PRODUCT_OPTION_NAME);
+    expect(preview.labels).toEqual(["S : 2", "XL : 1"]);
+    expect(preview.canPickOnListing).toBe(true);
+    expect(preview.groupId).toBe(LEGACY_OPTION_GROUP_ID);
+    expect(preview.choices).toEqual([
+      { value: "S", label: "S", price: null },
+      { value: "XL", label: "XL", price: null },
+    ]);
+  });
+
+  it("prefixes multi-group labels with group name and disables listing pick", () => {
+    const preview = toProductSizePreview(
+      normalizeProductSizeConfig({
+        enabled: true,
+        groups: [
+          {
+            id: "size",
+            name: "Size",
+            options: [{ value: "36", qty: 2 }],
+          },
+          {
+            id: "magnet",
+            name: "Magnet",
+            options: [{ value: "WITH MAGNET", qty: 5 }],
+          },
+        ],
+      }),
+    );
+
+    expect(preview.labels).toEqual(["Size: 36", "Magnet: WITH MAGNET"]);
+    expect(preview.canPickOnListing).toBe(false);
+    expect(preview.choices).toEqual([]);
+    expect(preview.groupId).toBe("");
   });
 });

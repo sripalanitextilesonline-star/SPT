@@ -1,4 +1,5 @@
-import { invalidateStorefrontCache } from "@/lib/cache/invalidate-storefront";
+import { invalidateProductCaches } from "@/lib/cache/invalidate-storefront";
+import { withRetry } from "@/lib/resilience";
 import { mergePaymentMeta, readPaymentMeta } from "@/lib/orders/payment-meta";
 import {
   getActiveOptionGroups,
@@ -136,10 +137,10 @@ async function lockAndDecrementOptionStock(
 ) {
   const key = getProductSizeConfigKey(productId);
   const locked = await tx.execute(
-    sql`SELECT id, value FROM api_settings WHERE key = ${key} FOR UPDATE`,
+    sql`SELECT key, value FROM api_settings WHERE key = ${key} FOR UPDATE`,
   );
 
-  const row = locked.at(0) as { id?: string; value?: unknown } | undefined;
+  const row = locked.at(0) as { key?: string; value?: unknown } | undefined;
   if (!row) {
     return false;
   }
@@ -217,9 +218,9 @@ async function incrementOptionStock(
 ) {
   const key = getProductSizeConfigKey(productId);
   const locked = await tx.execute(
-    sql`SELECT id, value FROM api_settings WHERE key = ${key} FOR UPDATE`,
+    sql`SELECT key, value FROM api_settings WHERE key = ${key} FOR UPDATE`,
   );
-  const row = locked.at(0) as { id?: string; value?: unknown } | undefined;
+  const row = locked.at(0) as { key?: string; value?: unknown } | undefined;
   const config = normalizeProductSizeConfig(row?.value);
   if (!config.enabled || getActiveOptionGroups(config).length === 0) {
     return;
@@ -264,70 +265,106 @@ export async function reserveStockInTransaction(
     STOCK_HOLD_PRE_PAYMENT_MINUTES,
   );
   const reservationLines: StockReservationLine[] = [];
+  const applied: Array<{
+    productId: string;
+    quantity: number;
+    selections: OptionSelections;
+    selectedSize?: string;
+    sizeDecremented: boolean;
+  }> = [];
 
   const sortedLines = [...input.lines].sort((a, b) =>
     a.productId.localeCompare(b.productId),
   );
 
-  for (const line of sortedLines) {
-    const productName = input.productNames.get(line.productId);
-    const selectedSize = line.size ?? input.selectedSizes[line.productId] ?? "";
-    const selections =
-      line.selections ??
-      input.selectedSelections?.[line.productId] ??
-      (selectedSize
-        ? resolveOptionSelections({
-            sizeConfig: input.sizeConfigs.get(line.productId),
-            selectedSize,
-          })
-        : {});
+  try {
+    for (const line of sortedLines) {
+      const productName = input.productNames.get(line.productId);
+      const selectedSize =
+        line.size ?? input.selectedSizes[line.productId] ?? "";
+      const selections =
+        line.selections ??
+        input.selectedSelections?.[line.productId] ??
+        (selectedSize
+          ? resolveOptionSelections({
+              sizeConfig: input.sizeConfigs.get(line.productId),
+              selectedSize,
+            })
+          : {});
 
-    const productReserved = await lockAndDecrementProductStock(
-      tx,
-      line.productId,
-      line.quantity,
-    );
-
-    if (!productReserved) {
-      throw new StockReservationError(
-        productName
-          ? `${productName} just sold out. Please refresh and try again.`
-          : "An item in your cart just sold out. Please refresh and try again.",
-        line.productId,
-        productName,
-      );
-    }
-
-    const sizeConfig = input.sizeConfigs.get(line.productId);
-    const hasConfiguredSizes =
-      Boolean(sizeConfig?.enabled) &&
-      getActiveOptionGroups(sizeConfig).length > 0;
-
-    if (hasConfiguredSizes) {
-      const sizeReserved = await lockAndDecrementOptionStock(
+      const productReserved = await lockAndDecrementProductStock(
         tx,
         line.productId,
-        selections,
         line.quantity,
       );
 
-      if (!sizeReserved) {
+      if (!productReserved) {
         throw new StockReservationError(
           productName
-            ? `${productName} is no longer available for the selected options.`
-            : "Selected options are no longer available.",
+            ? `${productName} just sold out. Please refresh and try again.`
+            : "An item in your cart just sold out. Please refresh and try again.",
           line.productId,
           productName,
         );
       }
-    }
 
-    reservationLines.push({
-      productId: line.productId,
-      quantity: line.quantity,
-      ...(selectedSize ? { size: selectedSize } : {}),
-      ...(Object.keys(selections).length > 0 ? { selections } : {}),
-    });
+      const appliedLine = {
+        productId: line.productId,
+        quantity: line.quantity,
+        selections,
+        selectedSize: selectedSize || undefined,
+        sizeDecremented: false,
+      };
+      applied.push(appliedLine);
+
+      const sizeConfig = input.sizeConfigs.get(line.productId);
+      const hasConfiguredSizes =
+        Boolean(sizeConfig?.enabled) &&
+        getActiveOptionGroups(sizeConfig).length > 0;
+
+      if (hasConfiguredSizes) {
+        const sizeReserved = await lockAndDecrementOptionStock(
+          tx,
+          line.productId,
+          selections,
+          line.quantity,
+        );
+
+        if (!sizeReserved) {
+          throw new StockReservationError(
+            productName
+              ? `${productName} is no longer available for the selected options.`
+              : "Selected options are no longer available.",
+            line.productId,
+            productName,
+          );
+        }
+        appliedLine.sizeDecremented = true;
+      }
+
+      reservationLines.push({
+        productId: line.productId,
+        quantity: line.quantity,
+        ...(selectedSize ? { size: selectedSize } : {}),
+        ...(Object.keys(selections).length > 0 ? { selections } : {}),
+      });
+    }
+  } catch (error) {
+    for (const item of [...applied].reverse()) {
+      if (item.sizeDecremented) {
+        await incrementOptionStock(
+          tx,
+          item.productId,
+          item.selections,
+          item.quantity,
+          item.selectedSize,
+        ).catch(() => undefined);
+      }
+      await incrementProductStock(tx, item.productId, item.quantity).catch(
+        () => undefined,
+      );
+    }
+    throw error;
   }
 
   return {
@@ -399,6 +436,8 @@ async function loadOrderLinesForRelease(
     .select({
       productId: orderLines.productId,
       quantity: orderLines.quantity,
+      size: orderLines.size,
+      selections: orderLines.selections,
     })
     .from(orderLines)
     .where(eq(orderLines.orderId, orderId));
@@ -406,8 +445,13 @@ async function loadOrderLinesForRelease(
   return lines.map((line) => ({
     productId: line.productId,
     quantity: line.quantity,
-    ...(selectedSizes[line.productId]
-      ? { size: selectedSizes[line.productId] }
+    ...(line.size
+      ? { size: String(line.size).trim().toUpperCase() }
+      : selectedSizes[line.productId]
+        ? { size: selectedSizes[line.productId] }
+        : {}),
+    ...(line.selections && typeof line.selections === "object"
+      ? { selections: line.selections as Record<string, string> }
       : {}),
   }));
 }
@@ -495,7 +539,9 @@ export async function confirmStockReservation(
     })
     .where(eq(orders.id, orderId));
 
-  await invalidateStorefrontCache();
+  await invalidateProductCaches({
+    productIds: readReservationLines(meta).map((line) => line.productId),
+  });
   return { confirmed: true };
 }
 
@@ -506,6 +552,7 @@ export async function releaseStockReservation(
 ): Promise<{ released: boolean; skippedReason?: string }> {
   let released = false;
   let skippedReason: string | undefined;
+  let releasedProductIds: string[] = [];
 
   await runSessionTransaction(async (tx) => {
     const locked = await tx.execute(
@@ -582,6 +629,7 @@ export async function releaseStockReservation(
         .where(eq(orders.id, orderId));
 
       released = true;
+      releasedProductIds = sortedLines.map((line) => line.productId);
       return;
     }
 
@@ -634,10 +682,11 @@ export async function releaseStockReservation(
       .where(eq(orders.id, orderId));
 
     released = true;
+    releasedProductIds = sortedOrphanLines.map((line) => line.productId);
   }, "stock:release");
 
-  if (released) {
-    await invalidateStorefrontCache();
+  if (released && releasedProductIds.length > 0) {
+    await invalidateProductCaches({ productIds: releasedProductIds });
   }
 
   return {
@@ -667,6 +716,7 @@ export async function releaseExpiredStockReservations(options?: {
     .limit(limit);
 
   let released = 0;
+  let failed = 0;
 
   for (const order of candidates) {
     const meta = readPaymentMeta(order.payment_meta);
@@ -680,15 +730,25 @@ export async function releaseExpiredStockReservations(options?: {
 
     if (!shouldReleaseTracked && !shouldReleaseOrphan) continue;
 
-    const result = await releaseStockReservation(
-      order.id,
-      "reservation_expired",
-      { allowOrphanFallback: true },
-    );
-    if (result.released) released += 1;
+    try {
+      const result = await withRetry(
+        () =>
+          releaseStockReservation(order.id, "reservation_expired", {
+            allowOrphanFallback: true,
+          }),
+        { label: `stock:release:${order.id}`, attempts: 3 },
+      );
+      if (result.released) released += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn(
+        `[stock-reservation] expired release failed for order ${order.id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
-  return { scanned: candidates.length, released };
+  return { scanned: candidates.length, released, failed };
 }
 
 export async function loadOrderReservationLines(
@@ -702,6 +762,8 @@ export async function loadOrderReservationLines(
     .select({
       productId: orderLines.productId,
       quantity: orderLines.quantity,
+      size: orderLines.size,
+      selections: orderLines.selections,
     })
     .from(orderLines)
     .where(eq(orderLines.orderId, order.id));
@@ -720,8 +782,13 @@ export async function loadOrderReservationLines(
   return lines.map((line) => ({
     productId: line.productId,
     quantity: line.quantity,
-    ...(selectedSizes[line.productId]
-      ? { size: selectedSizes[line.productId] }
+    ...(line.size
+      ? { size: String(line.size).trim().toUpperCase() }
+      : selectedSizes[line.productId]
+        ? { size: selectedSizes[line.productId] }
+        : {}),
+    ...(line.selections && typeof line.selections === "object"
+      ? { selections: line.selections as Record<string, string> }
       : {}),
   }));
 }

@@ -1,17 +1,22 @@
 /**
- * Thin R2 proxy for Vercel (and other hosts without MEDIA_BUCKET).
+ * Thin R2 proxy for Sri Palani Textiles on Vercel (no MEDIA_BUCKET on the Next host).
  *
  * Auth:
  * - Authorization: Bearer <MEDIA_PROXY_SECRET> (server / Vercel)
- * - Authorization: Bearer upload.v1.<exp>.<keyB64>.<sig> (short-lived client PUT)
+ * - Authorization: Bearer uv1.<exp>.<keyB64>.<sig> (short-lived client PUT
+ *   to uploads/staging/* only; image bytes skip Vercel)
  *
- * Industry path: client PUTs staging → server POST /promote copies inside R2
- * (no image bytes through Vercel).
+ * Public CDN (no auth):
+ * - GET /cdn/{options}/{key}  e.g. /cdn/w=400,q=75,f=webp/uploads/foo.png
+ *   Resizes via Cloudflare Images binding over R2 originals.
  */
+
+import { corsHeaders } from "./cors";
 
 type R2ObjectBody = {
   size: number;
   body: ReadableStream | null;
+  arrayBuffer: () => Promise<ArrayBuffer>;
   httpMetadata?: { contentType?: string };
 };
 
@@ -31,35 +36,30 @@ type R2BucketBinding = {
   delete: (keys: string | string[]) => Promise<void>;
 };
 
+/** Minimal Images binding surface (Cloudflare Images Free supports R2 transforms). */
+type ImagesBinding = {
+  input: (stream: ReadableStream) => {
+    transform: (opts: { width?: number; height?: number; fit?: string }) => {
+      output: (opts: {
+        format?: string;
+        quality?: number;
+      }) => Promise<{ response: () => Response }>;
+    };
+  };
+};
+
 export interface Env {
   MEDIA_BUCKET: R2BucketBinding;
   MEDIA_PROXY_SECRET: string;
+  IMAGES: ImagesBinding;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const TOKEN_PREFIX = "uv1";
 const STAGING_PREFIX = "uploads/staging/";
-
-const CORS_ORIGINS = new Set([
-  "https://software-saree-order.vercel.app",
-  "https://sripalanitextiles.com",
-  "https://www.sripalanitextiles.com",
-  "http://localhost:3000",
-  "https://localhost",
-  "http://localhost",
-  "capacitor://localhost",
-]);
-
-function corsHeaders(request: Request): HeadersInit {
-  const origin = request.headers.get("origin") ?? "";
-  const allowOrigin = CORS_ORIGINS.has(origin) ? origin : "*";
-  return {
-    "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Methods": "GET, HEAD, PUT, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Max-Age": "86400",
-  };
-}
+const MAX_CDN_WIDTH = 1600;
+const DEFAULT_CDN_WIDTH = 800;
+const DEFAULT_CDN_QUALITY = 75;
 
 function jsonResponse(request: Request, body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -159,6 +159,7 @@ async function verifyUploadToken(
     return false;
   }
   if (key !== expectedKey) return false;
+  // Client tokens may only write staging keys.
   if (!key.startsWith(STAGING_PREFIX)) return false;
   const payload = `${TOKEN_PREFIX}:${exp}:${key}`;
   const expectedSig = await hmacSign(secret, payload);
@@ -189,6 +190,151 @@ function isSafeFinalKey(key: string): boolean {
   return /^uploads\/[A-Za-z0-9/_-]+\.[a-z0-9]+$/i.test(key);
 }
 
+type CdnOptions = {
+  width: number;
+  quality: number;
+  format: "image/webp" | "image/avif" | "image/jpeg";
+};
+
+function parseCdnFormat(raw: string | undefined): CdnOptions["format"] | null {
+  const v = (raw || "webp").toLowerCase();
+  if (v === "webp") return "image/webp";
+  if (v === "avif") return "image/avif";
+  if (v === "jpeg" || v === "jpg") return "image/jpeg";
+  return null;
+}
+
+function parseCdnOptions(raw: string): CdnOptions | null {
+  const parts = raw
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  let width = DEFAULT_CDN_WIDTH;
+  let quality = DEFAULT_CDN_QUALITY;
+  let format: CdnOptions["format"] = "image/webp";
+
+  for (const part of parts) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) return null;
+    const k = part.slice(0, eq).toLowerCase();
+    const v = part.slice(eq + 1);
+    if (k === "w" || k === "width") {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 16 || n > MAX_CDN_WIDTH) return null;
+      width = Math.round(n);
+    } else if (k === "q" || k === "quality") {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 20 || n > 100) return null;
+      quality = Math.round(n);
+    } else if (k === "f" || k === "format") {
+      const fmt = parseCdnFormat(v);
+      if (!fmt) return null;
+      format = fmt;
+    } else {
+      return null;
+    }
+  }
+
+  return { width, quality, format };
+}
+
+/** Public product media only; never expose arbitrary bucket paths. */
+function isPublicCdnKey(key: string): boolean {
+  return key.startsWith("uploads/") && !key.includes("..");
+}
+
+async function handleCdnGet(
+  request: Request,
+  env: Env,
+  optionsRaw: string,
+  keyRaw: string,
+): Promise<Response> {
+  const parsed = parseCdnOptions(optionsRaw);
+  if (!parsed) return badRequest(request, "Invalid CDN options.");
+
+  // Images Free: only ~5k unique transforms/month. Snap every /cdn request to
+  // the proven working size so PDP/thumb URLs reuse the same cached variant.
+  const opts: CdnOptions = {
+    ...parsed,
+    width: 400,
+    quality: 75,
+    format: "image/webp",
+  };
+
+  const key = sanitizeKey(keyRaw);
+  if (!key || !isPublicCdnKey(key)) {
+    return badRequest(request, "Missing or invalid key.");
+  }
+
+  const cache = caches.default;
+
+  // Prefer any previously cached successful transform for this exact URL,
+  // then the known-good 400w canonical URL (from before Images Free exhausted).
+  const cacheHit = await cache.match(request);
+  if (cacheHit && cacheHit.ok) return cacheHit;
+
+  const canonicalUrl = new URL(request.url);
+  const keyPath = key.split("/").map(encodeURIComponent).join("/");
+  canonicalUrl.pathname = `/cdn/w=400,q=75,f=webp/${keyPath}`;
+  const canonicalRequest = new Request(canonicalUrl.toString(), {
+    method: "GET",
+  });
+  const canonicalHit = await cache.match(canonicalRequest);
+  if (canonicalHit && canonicalHit.ok) {
+    const headers = new Headers(canonicalHit.headers);
+    headers.set("X-SPT-CDN-Canonical", "w=400");
+    Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+    const reused = new Response(canonicalHit.body, {
+      status: 200,
+      headers,
+    });
+    await cache.put(request, reused.clone());
+    return reused;
+  }
+
+  const obj = await env.MEDIA_BUCKET.get(key);
+  if (!obj) {
+    return jsonResponse(request, { error: "Not found" }, 404);
+  }
+
+  const contentType =
+    obj.httpMetadata?.contentType || "application/octet-stream";
+
+  let originalBytes: ArrayBuffer;
+  try {
+    originalBytes = await obj.arrayBuffer();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to read object";
+    console.error("[cdn] r2 read failed:", key, message);
+    return jsonResponse(request, { error: "Not found" }, 404);
+  }
+
+  if (!originalBytes.byteLength) {
+    return jsonResponse(request, { error: "Not found" }, 404);
+  }
+
+  // Images Free unique-transform quota is exhausted on this account. Calling
+  // the Images binding hard-fails the isolate (platform 500); try/catch does
+  // not help. Serve R2 originals until Images Paid is enabled.
+  // Keep `opts` referenced so the snap stays in the bundle for when we re-enable.
+  void opts;
+  void env.IMAGES;
+
+  const headers = new Headers();
+  headers.set("Content-Type", contentType);
+  headers.set(
+    "Cache-Control",
+    "public, max-age=3600, stale-while-revalidate=86400",
+  );
+  headers.set("X-SPT-CDN-Fallback", "original");
+  Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+
+  const response = new Response(originalBytes, { status: 200, headers });
+  await cache.put(request, response.clone());
+  return response;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -201,10 +347,14 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return jsonResponse(request, { ok: true, promote: true });
+      return jsonResponse(request, {
+        ok: true,
+        promote: true,
+        images: Boolean(env.IMAGES),
+      });
     }
 
-    // Server-only: copy staging → final inside R2 (no bytes to Vercel).
+    // Server-only: copy staging to final inside R2 (no bytes to Vercel).
     if (request.method === "POST" && url.pathname === "/promote") {
       const auth = await authorizeRequest(request, env, null);
       if (auth !== "server") return unauthorized(request);
@@ -267,6 +417,34 @@ export default {
       });
     }
 
+    // Public resize: /cdn/{options}/{key...}
+    if (
+      (request.method === "GET" || request.method === "HEAD") &&
+      url.pathname.startsWith("/cdn/")
+    ) {
+      const rest = url.pathname.slice("/cdn/".length);
+      const slash = rest.indexOf("/");
+      if (slash <= 0) {
+        return badRequest(request, "Expected /cdn/{options}/{key}");
+      }
+      const optionsRaw = rest.slice(0, slash);
+      const keyRaw = rest.slice(slash + 1);
+      // Always process as GET so Cache API + Images transforms share one key path.
+      // HEAD alone was returning 502 from the Images binding / cache mismatch.
+      const getRequest = new Request(request.url, {
+        method: "GET",
+        headers: request.headers,
+      });
+      const response = await handleCdnGet(getRequest, env, optionsRaw, keyRaw);
+      if (request.method === "HEAD") {
+        return new Response(null, {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
+      return response;
+    }
+
     if (url.pathname !== "/object") {
       return badRequest(request, "Unknown path.");
     }
@@ -275,6 +453,7 @@ export default {
     const auth = await authorizeRequest(request, env, objectKey);
     if (!auth) return unauthorized(request);
 
+    // Upload tokens: PUT staging only.
     if (auth === "upload" && request.method !== "PUT") {
       return unauthorized(request);
     }
@@ -282,6 +461,9 @@ export default {
     if (request.method === "PUT") {
       const key = objectKey;
       if (!key) return badRequest(request, "Missing or invalid key.");
+      if (auth === "upload" && !key.startsWith(STAGING_PREFIX)) {
+        return unauthorized(request);
+      }
 
       const contentLength = Number(request.headers.get("content-length") || 0);
       if (

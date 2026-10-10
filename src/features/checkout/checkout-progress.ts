@@ -1,6 +1,8 @@
 export type CheckoutProgressUpdate = {
   title: string;
   message: string;
+  /** When true, keep checkout locked but do not cover Razorpay’s modal. */
+  suppressOverlay?: boolean;
 };
 
 export function savingAddressProgress(): CheckoutProgressUpdate {
@@ -28,14 +30,34 @@ export function openingPaymentProgress(
   provider?: string,
 ): CheckoutProgressUpdate {
   const label =
-    provider === "cashfree"
-      ? "Cashfree"
-      : provider === "phonepe"
-        ? "PhonePe"
-        : "payment gateway";
+    provider === "razorpay"
+      ? "Razorpay"
+      : provider === "cashfree"
+        ? "Cashfree"
+        : provider === "phonepe"
+          ? "PhonePe"
+          : "payment gateway";
 
   return {
     title: "Almost there",
     message: `Opening ${label}. Please do not close or refresh this page.`,
+    // Razorpay attaches a body overlay. Hide our spinner so it cannot cover or
+    // compete with the payment modal while checkout.js is opening.
+    suppressOverlay: provider === "razorpay",
+  };
+}
+
+export function razorpayModalOpenProgress(): CheckoutProgressUpdate {
+  return {
+    title: "Pay securely",
+    message: "Complete payment in the Razorpay window.",
+    suppressOverlay: true,
+  };
+}
+
+export function confirmingPaymentProgress(): CheckoutProgressUpdate {
+  return {
+    title: "Payment received",
+    message: "Confirming your order…",
   };
 }

@@ -6,6 +6,7 @@ import {
 } from "@/lib/auth/middleware-session-cookie";
 import { getCanonicalSiteOrigin } from "@/lib/auth/site-urls";
 import { buildCanonicalRedirectUrl } from "@/lib/auth/canonical-host-redirect";
+import { getLocallyVerifiedUser } from "@/lib/auth/local-jwt";
 import {
   checkAuthRateLimit,
   getRequestIp,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/auth/rate-limit";
 
 const AUTH_GET_USER_TIMEOUT_MS = 5000;
+const SESSION_REFRESH_WINDOW_SECONDS = 120;
 
 function redirectToAdminSignIn(
   request: NextRequest,
@@ -92,6 +94,14 @@ export async function middleware(request: NextRequest) {
     return canonicalRedirect;
   }
 
+  // OAuth callback must run untouched: middleware getUser/clearCookies races the
+  // code exchange and can drop the new session before Set-Cookie lands.
+  if (pathname.startsWith("/auth/callback")) {
+    return NextResponse.next({
+      request: { headers: request.headers },
+    });
+  }
+
   if (isAuthRateLimitPath(pathname)) {
     const ip = getRequestIp(request.headers);
     const { limited } = await checkAuthRateLimit(ip);
@@ -136,19 +146,32 @@ export async function middleware(request: NextRequest) {
   }
 
   if (authCookieState === "invalid") {
-    const response = NextResponse.next({
-      request: { headers: request.headers },
-    });
-    clearSupabaseAuthCookiesOnResponse(request, response);
-
+    // Only wipe cookies on admin. Clearing on the storefront after Google OAuth
+    // can drop a fresh session before the client AuthProvider reads it.
     if (isAdminPath) {
+      const response = NextResponse.next({
+        request: { headers: request.headers },
+      });
+      clearSupabaseAuthCookiesOnResponse(request, response);
       return redirectToAdminSignIn(request, pathname);
     }
 
-    return response;
+    return NextResponse.next({
+      request: { headers: request.headers },
+    });
   }
 
   if (!needsSessionRefresh) {
+    return NextResponse.next({
+      request: { headers: request.headers },
+    });
+  }
+
+  // Valid, not-about-to-expire token: no refresh needed, skip /auth/v1/user.
+  const localUser = await getLocallyVerifiedUser(request.cookies.getAll(), {
+    minTtlSeconds: SESSION_REFRESH_WINDOW_SECONDS,
+  });
+  if (localUser) {
     return NextResponse.next({
       request: { headers: request.headers },
     });
@@ -213,10 +236,8 @@ export async function middleware(request: NextRequest) {
     return redirectToAdminSignIn(request, pathname);
   }
 
-  if (!isAdminPath && !user) {
-    clearSupabaseAuthCookiesOnResponse(request, response);
-  }
-
+  // Do not clear storefront cookies when getUser is briefly null — that wiped
+  // valid Google sessions right after /auth/callback.
   return response;
 }
 

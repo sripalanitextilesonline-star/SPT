@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
@@ -8,42 +8,98 @@ import { useToast } from "@/components/ui/use-toast";
 import type { CartItems } from "@/features/carts";
 import { CheckoutAddressDialog } from "@/features/addresses";
 import type { SavedShippingAddress } from "@/features/addresses";
-import { clearCheckoutAddressDraft } from "@/features/addresses/lib/checkoutAddressDraft";
+import {
+  clearCheckoutAddressDraft,
+  saveCheckoutAddressDraft,
+} from "@/features/addresses/lib/checkoutAddressDraft";
+import type { AddressFormValues } from "@/features/addresses/validations/addressFormSchema";
 import { clearClaimedOfferCode } from "@/features/offers/lib/welcomeOffer";
+import {
+  formatCheckoutErrorMessage,
+  isCheckoutPaymentCancelled,
+} from "@/features/checkout/format-checkout-error";
+import { creatingOrderProgress } from "@/features/checkout/checkout-progress";
 import { startCheckout } from "@/features/checkout/startCheckout";
+import {
+  preconnectRazorpayCheckout,
+  preloadRazorpayCheckoutScript,
+} from "@/lib/payments/razorpay-checkout-client";
 import { useCheckoutProgress } from "@/features/checkout/useCheckoutProgress";
 import BulkOrderGuardDialog from "@/features/carts/components/BulkOrderGuardDialog";
 import { isBulkOrderQuantity } from "@/features/carts/constants/bulkOrder";
+import {
+  findIncompleteCheckoutProductIds,
+  resolveCheckoutSizeConfigs,
+  type CartSizeConfigPayload,
+} from "@/features/carts/cart-options-guard";
 import { useAuth } from "@/providers/AuthProvider";
 import { useBulkOrderGuardConfig } from "@/providers/BulkOrderGuardProvider";
-import { fetchWithTimeout } from "@/lib/network/fetchWithTimeout";
+import { useCheckoutChrome } from "@/providers/CheckoutChromeProvider";
+import { reportCheckoutFunnelEvent } from "@/lib/checkout/report-checkout-funnel-event.client";
+
+export const CART_DELIVERY_PINCODE_INPUT_ID = "cart-delivery-pincode";
 
 type CheckoutButtonProps = React.ComponentProps<typeof Button> & {
   order: CartItems;
   guest: boolean;
   promoCode?: string | null;
   missingSizeProductNames?: string[];
+  /** Size configs already loaded on the cart page (avoids size-only false blocks). */
+  sizeConfigsByProductId?: Record<string, CartSizeConfigPayload | undefined>;
   requireDeliveryStateSelection?: boolean;
   hasDeliveryStateSelected?: boolean;
+  /** PIN / city / state already captured on the cart page for shipping. */
+  cartAddressDefaults?: Partial<AddressFormValues>;
 };
+
+function focusCartDeliveryPincode() {
+  const el = document.getElementById(CART_DELIVERY_PINCODE_INPUT_ID);
+  if (!(el instanceof HTMLElement)) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (el instanceof HTMLInputElement) {
+    window.setTimeout(() => el.focus(), 200);
+  }
+}
+
+function focusFirstIncompleteCartLine() {
+  const el = document.querySelector<HTMLElement>(
+    "[data-cart-line-incomplete='true']",
+  );
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 function CheckoutButton({
   order,
   guest,
   promoCode,
   missingSizeProductNames = [],
+  sizeConfigsByProductId,
   requireDeliveryStateSelection = false,
   hasDeliveryStateSelected = true,
+  cartAddressDefaults,
   ...props
 }: CheckoutButtonProps) {
   const { user } = useAuth();
   const bulkOrder = useBulkOrderGuardConfig();
   const { toast } = useToast();
+  const { setHideStoreChrome } = useCheckoutChrome();
   const [open, setOpen] = useState(false);
   const [bulkGuardOpen, setBulkGuardOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { progress, isLocked, beginProgress, clearProgress, overlay } =
     useCheckoutProgress();
+
+  useEffect(() => {
+    preconnectRazorpayCheckout();
+    preloadRazorpayCheckoutScript();
+  }, []);
+
+  useEffect(() => {
+    setHideStoreChrome(open || isLocked || isLoading);
+    return () => setHideStoreChrome(false);
+  }, [open, isLocked, isLoading, setHideStoreChrome]);
+
   const hasBulkLineItem = useMemo(
     () =>
       bulkOrder.enabled &&
@@ -57,22 +113,33 @@ function CheckoutButton({
     [order],
   );
 
+  const pinBlocked = requireDeliveryStateSelection && !hasDeliveryStateSelected;
+  const sizeBlocked = missingSizeProductNames.length > 0;
+
   const accountDefaults = useMemo(
-    () =>
-      user?.email
+    () => ({
+      ...(user?.email
         ? {
             email: user.email,
             fullName:
               (user.user_metadata?.full_name as string | undefined) ?? "",
           }
-        : undefined,
-    [user?.email, user?.user_metadata?.full_name],
+        : {}),
+      ...cartAddressDefaults,
+    }),
+    [cartAddressDefaults, user?.email, user?.user_metadata?.full_name],
   );
 
   const handleCheckoutComplete = async (shipping: SavedShippingAddress) => {
     setOpen(false);
     await new Promise((r) => setTimeout(r, 80));
     setIsLoading(true);
+    // Keep progress visible across dialog close so cart chrome does not flash.
+    beginProgress(creatingOrderProgress());
+    setOpen(false);
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 250);
+    });
     try {
       await startCheckout({
         order,
@@ -85,12 +152,25 @@ function CheckoutButton({
       if (promoCode) clearClaimedOfferCode();
     } catch (err) {
       clearProgress();
-      toast({
-        title: "Checkout failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-      throw err;
+      if (isCheckoutPaymentCancelled(err)) {
+        reportCheckoutFunnelEvent({ type: "payment_cancel" });
+        toast({
+          title: "Payment not completed",
+          description:
+            "No charge was completed. Tap Check out again when you are ready — your cart is still here.",
+        });
+      } else {
+        reportCheckoutFunnelEvent({
+          type: "checkout_session_fail",
+          reason: formatCheckoutErrorMessage(err),
+        });
+        toast({
+          title: "Checkout failed",
+          description: formatCheckoutErrorMessage(err),
+          variant: "destructive",
+        });
+      }
+      // Handled via toast — do not rethrow (avoids Sentry unhandledrejection noise).
     } finally {
       setIsLoading(false);
     }
@@ -105,65 +185,75 @@ function CheckoutButton({
         className={cn("w-full", props.className)}
         onClick={async () => {
           if (isLocked) return;
-          if (requireDeliveryStateSelection && !hasDeliveryStateSelected) {
+          reportCheckoutFunnelEvent({ type: "checkout_click" });
+          if (pinBlocked) {
+            reportCheckoutFunnelEvent({ type: "checkout_pin_blocked" });
+            focusCartDeliveryPincode();
             toast({
               title: "Enter delivery PIN",
               description:
-                "Please enter your 6-digit PIN code in cart summary before checkout.",
-              variant: "destructive",
+                "Enter your 6-digit PIN in the cart summary to continue.",
             });
             return;
           }
-          if (missingSizeProductNames.length > 0) {
+          if (sizeBlocked) {
+            reportCheckoutFunnelEvent({ type: "checkout_size_blocked" });
+            focusFirstIncompleteCartLine();
             toast({
               title: "Select option in cart",
               description: `${missingSizeProductNames[0]}: please select an option before checkout.`,
-              variant: "destructive",
             });
             return;
           }
-          const uncheckedIds = Object.entries(order)
-            .filter(
-              ([, item]) =>
-                !String(item.size ?? "")
-                  .trim()
-                  .toUpperCase(),
-            )
-            .map(([productId]) => productId);
-          if (uncheckedIds.length > 0) {
-            const results = await Promise.all(
-              uncheckedIds.map(async (productId) => {
-                try {
-                  const res = await fetchWithTimeout(
-                    `/api/products/size-config?productId=${encodeURIComponent(productId)}`,
-                    { cache: "no-store" },
-                  );
-                  if (!res.ok) return { productId, required: false };
-                  const payload = (await res.json()) as { enabled?: boolean };
-                  return { productId, required: Boolean(payload.enabled) };
-                } catch {
-                  return { productId, required: false };
-                }
-              }),
-            );
-            const requiredMissing = results.find((result) => result.required);
-            if (requiredMissing) {
-              toast({
-                title: "Select option in cart",
-                description:
-                  "Please select the required option for all products before checkout.",
-                variant: "destructive",
-              });
-              return;
-            }
+          // Align with cart-page completeness: selections + size, not size alone.
+          const productIds = Object.values(order)
+            .map((item) => item.productId)
+            .filter((id): id is string => Boolean(id));
+          const configs = await resolveCheckoutSizeConfigs({
+            productIds,
+            knownConfigs: sizeConfigsByProductId,
+          });
+          const incompleteIds = findIncompleteCheckoutProductIds({
+            order,
+            sizeConfigsByProductId: configs,
+          });
+          if (incompleteIds.length > 0) {
+            reportCheckoutFunnelEvent({ type: "checkout_size_blocked" });
+            focusFirstIncompleteCartLine();
+            toast({
+              title: "Select option in cart",
+              description:
+                "Please select the required option for all products before checkout.",
+            });
+            return;
           }
           if (hasBulkLineItem) {
             setBulkGuardOpen(true);
             return;
           }
+          if (
+            cartAddressDefaults &&
+            Object.keys(cartAddressDefaults).length > 0
+          ) {
+            saveCheckoutAddressDraft(cartAddressDefaults);
+          }
+          reportCheckoutFunnelEvent({ type: "checkout_address_open" });
           setOpen(true);
         }}
-        disabled={isLoading || isLocked || props.disabled}
+        disabled={
+          isLoading ||
+          isLocked ||
+          pinBlocked ||
+          sizeBlocked ||
+          Boolean(props.disabled)
+        }
+        title={
+          pinBlocked
+            ? "Enter your delivery PIN first"
+            : sizeBlocked
+              ? "Select required options first"
+              : props.title
+        }
       >
         {isLoading || isLocked ? "Processing…" : "Check out"}
         {(isLoading || isLocked) && (
@@ -174,7 +264,6 @@ function CheckoutButton({
       <CheckoutAddressDialog
         open={open}
         onOpenChange={(next) => {
-          if (isLocked && !next) return;
           setOpen(next);
         }}
         onComplete={handleCheckoutComplete}

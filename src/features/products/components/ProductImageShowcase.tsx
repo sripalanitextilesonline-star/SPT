@@ -2,9 +2,9 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { gql, DocumentType } from "@/gql";
-import Image from "next/image";
+import { StorefrontImage } from "@/components/media/StorefrontImage";
 import { Icons } from "@/components/layouts/icons";
-import { cn, getStorefrontImageProps, keytoUrl } from "@/lib/utils";
+import { cn, keytoUrl } from "@/lib/utils";
 import {
   productImageTransitionName,
   viewTransitionStyle,
@@ -92,7 +92,8 @@ function ProductImageShowcase({
     return (
       <div
         className={cn(
-          "w-full min-w-0 overflow-hidden rounded-md bg-muted aspect-[3/4] max-h-[70vh]",
+          "w-full min-w-0 overflow-hidden rounded-md bg-muted",
+          "aspect-[4/5] max-h-[min(36dvh,16rem)] md:aspect-[3/4] md:max-h-[min(70vh,36rem)]",
           className,
         )}
       />
@@ -132,13 +133,13 @@ function ProductImageShowcase({
                     : "border-border hover:border-foreground/40",
                 )}
               >
-                <Image
+                <StorefrontImage
                   src={imageSrc}
                   alt={image.alt || `Product thumbnail ${index + 1}`}
                   fill
                   sizes="64px"
+                  optimizeWidth={128}
                   className="object-cover object-top"
-                  {...getStorefrontImageProps(imageSrc)}
                 />
               </button>
             );
@@ -151,18 +152,18 @@ function ProductImageShowcase({
         <div
           className={cn(
             "relative w-full overflow-hidden rounded-md bg-muted",
-            "aspect-[3/4] max-h-[min(70vh,36rem)]",
+            "aspect-[4/5] max-h-[min(36dvh,16rem)] md:aspect-[3/4] md:max-h-[min(70vh,36rem)]",
           )}
         >
-          <Image
+          <StorefrontImage
             src={activeImageSrc}
             alt={activeImage.alt || "Product image"}
             fill
             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 55vw, 640px"
+            optimizeWidth={800}
             className="object-contain object-center"
             style={viewTransitionStyle(transitionName)}
             priority
-            {...getStorefrontImageProps(activeImageSrc)}
           />
 
           {hasMultiple ? (
@@ -216,13 +217,13 @@ function ProductImageShowcase({
                       : "border-border",
                   )}
                 >
-                  <Image
+                  <StorefrontImage
                     src={imageSrc}
                     alt={image.alt || `Product thumbnail ${index + 1}`}
                     fill
                     sizes="56px"
+                    optimizeWidth={112}
                     className="object-cover object-top"
-                    {...getStorefrontImageProps(imageSrc)}
                   />
                 </button>
               );

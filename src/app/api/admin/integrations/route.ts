@@ -3,20 +3,25 @@ import { getSessionUser, isAdminUser } from "@/lib/auth/admin";
 import {
   normalizeCashfreeIncoming,
   normalizePhonePeIncoming,
+  normalizeRazorpayIncoming,
   normalizeWhatsAppIncoming,
   parseEnabledCashfreeValue,
   parseEnabledPhonePeValue,
+  parseEnabledRazorpayValue,
   parseEnabledWhatsAppValue,
   parseIncomingCashfreeForEnable,
   parseIncomingPhonePeForEnable,
+  parseIncomingRazorpayForEnable,
   parseIncomingWhatsAppForEnable,
 } from "@/lib/integrations/payment-settings";
 import { validateCashfreeRuntimeConfig } from "@/lib/payments/cashfree-standards";
+import { validateRazorpayRuntimeConfig } from "@/lib/payments/razorpay-standards";
 import {
   INTEGRATION_KEYS,
   upsertIntegrationSetting,
   getIntegrationSetting,
 } from "@/lib/integrations/settings";
+import { parseCourierWeightSettings } from "@/lib/courier/calculate";
 import { invalidateStorefrontCache } from "@/lib/cache/invalidate-storefront";
 import { revalidatePath } from "next/cache";
 import { resolveHomeBannerSlideHref } from "@/lib/admin/home-banner-links";
@@ -28,6 +33,7 @@ import { withDbAsync } from "@/lib/supabase/db";
 const keySchema = z.enum([
   INTEGRATION_KEYS.cashfree,
   INTEGRATION_KEYS.phonepe,
+  INTEGRATION_KEYS.razorpay,
   INTEGRATION_KEYS.whatsapp,
   INTEGRATION_KEYS.storefrontSocial,
   INTEGRATION_KEYS.storefrontContact,
@@ -48,6 +54,7 @@ const saveSchema = z.object({
 const secretFieldsByKey: Record<string, string[]> = {
   [INTEGRATION_KEYS.cashfree]: ["clientSecret"],
   [INTEGRATION_KEYS.phonepe]: ["clientSecret"],
+  [INTEGRATION_KEYS.razorpay]: ["keySecret", "webhookSecret"],
   [INTEGRATION_KEYS.whatsapp]: ["accessToken"],
 };
 
@@ -107,6 +114,19 @@ const courierChargesPayloadSchema = z.object({
   freeShippingMin: z.number().int().min(0).max(999999),
   gstEnabled: z.boolean(),
   gstPercentage: z.number().min(0).max(50),
+  calculationMode: z.enum(["quantity", "weight"]),
+  weightSlabs: z
+    .array(
+      z.object({
+        upToKg: z.number().positive().max(1000),
+        tamilNadu: z.number().int().min(0).max(99999),
+        southStates: z.number().int().min(0).max(99999),
+        restOfIndia: z.number().int().min(0).max(99999),
+      }),
+    )
+    .min(1)
+    .max(20),
+  weightExtraPerKg: z.number().int().min(0).max(9999),
 });
 
 const offerCodeItemSchema = z.object({
@@ -147,14 +167,14 @@ const offerCodesPayloadSchema = z.object({
 
 const shopContactPersonSchema = z.object({
   name: z.string().trim().min(1).max(80),
-  phone: z.string().trim().min(5).max(32),
+  phone: z.string().trim().max(32),
 });
 
 const shopContactPayloadSchema = z.object({
   addressLines: z.array(z.string().trim().min(1)).min(1).max(10),
   gstin: z.string().trim().max(20),
   email: z.union([z.string().trim().email(), z.literal("")]),
-  contacts: z.array(shopContactPersonSchema).min(1).max(8),
+  contacts: z.array(shopContactPersonSchema).max(8),
 });
 
 async function ensureAdmin() {
@@ -174,6 +194,7 @@ export async function GET() {
     const [
       cashfree,
       phonepe,
+      razorpay,
       whatsapp,
       storefrontSocial,
       storefrontContact,
@@ -187,6 +208,7 @@ export async function GET() {
       Promise.all([
         getIntegrationSetting(INTEGRATION_KEYS.cashfree),
         getIntegrationSetting(INTEGRATION_KEYS.phonepe),
+        getIntegrationSetting(INTEGRATION_KEYS.razorpay),
         getIntegrationSetting(INTEGRATION_KEYS.whatsapp),
         getIntegrationSetting(INTEGRATION_KEYS.storefrontSocial),
         getIntegrationSetting(INTEGRATION_KEYS.storefrontContact),
@@ -202,6 +224,7 @@ export async function GET() {
     return NextResponse.json({
       cashfree: cashfree ?? null,
       phonepe: phonepe ?? null,
+      razorpay: razorpay ?? null,
       whatsapp: whatsapp ?? null,
       storefrontSocial: storefrontSocial ?? null,
       storefrontContact: storefrontContact ?? null,
@@ -306,6 +329,27 @@ export async function POST(request: NextRequest) {
         Object.assign(
           normalizedValue,
           normalizeCashfreeIncoming(incomingValue),
+        );
+      }
+    }
+
+    if (key === INTEGRATION_KEYS.razorpay) {
+      if (isEnabled) {
+        const razorpayParsed = parseIncomingRazorpayForEnable(incomingValue);
+        if (razorpayParsed.success === false) {
+          return NextResponse.json(
+            publicValidationPayload(
+              "Invalid Razorpay payload",
+              razorpayParsed.error,
+            ),
+            { status: 400 },
+          );
+        }
+        Object.assign(normalizedValue, razorpayParsed.data);
+      } else {
+        Object.assign(
+          normalizedValue,
+          normalizeRazorpayIncoming(incomingValue),
         );
       }
     }
@@ -438,6 +482,7 @@ export async function POST(request: NextRequest) {
         freeShippingMin: Number(incomingValue.freeShippingMin ?? 999),
         gstEnabled: Boolean(incomingValue.gstEnabled ?? true),
         gstPercentage: Number(incomingValue.gstPercentage ?? 5),
+        ...parseCourierWeightSettings(incomingValue),
       });
       if (!courierChargesParsed.success) {
         const courierError = courierChargesParsed as z.SafeParseError<
@@ -590,6 +635,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (key === INTEGRATION_KEYS.razorpay && isEnabled) {
+      const validated = parseEnabledRazorpayValue(mergedValue);
+      if (validated.success === false) {
+        return NextResponse.json(
+          publicValidationPayload(
+            "Razorpay settings are incomplete for enabled mode",
+            validated.error,
+          ),
+          { status: 400 },
+        );
+      }
+
+      const runtimeError = validateRazorpayRuntimeConfig({
+        keyId: validated.data.keyId,
+        keySecret: validated.data.keySecret,
+        environment: validated.data.environment,
+      });
+      if (runtimeError) {
+        return NextResponse.json({ message: runtimeError }, { status: 400 });
+      }
+    }
+
     if (key === INTEGRATION_KEYS.whatsapp && isEnabled) {
       const validated = parseEnabledWhatsAppValue(mergedValue);
       if (validated.success === false) {
@@ -605,22 +672,27 @@ export async function POST(request: NextRequest) {
 
     await upsertIntegrationSetting(key, mergedValue, isEnabled, user.id);
 
+    const checkoutGatewayKeys = [
+      INTEGRATION_KEYS.razorpay,
+      INTEGRATION_KEYS.cashfree,
+      INTEGRATION_KEYS.phonepe,
+    ] as const;
+
     if (
       isEnabled &&
-      (key === INTEGRATION_KEYS.cashfree || key === INTEGRATION_KEYS.phonepe)
+      checkoutGatewayKeys.includes(key as (typeof checkoutGatewayKeys)[number])
     ) {
-      const otherKey =
-        key === INTEGRATION_KEYS.cashfree
-          ? INTEGRATION_KEYS.phonepe
-          : INTEGRATION_KEYS.cashfree;
-      const otherSetting = await getIntegrationSetting(otherKey);
-      if (otherSetting?.isEnabled) {
-        await upsertIntegrationSetting(
-          otherKey,
-          (otherSetting.value ?? {}) as Record<string, unknown>,
-          false,
-          user.id,
-        );
+      for (const otherKey of checkoutGatewayKeys) {
+        if (otherKey === key) continue;
+        const otherSetting = await getIntegrationSetting(otherKey);
+        if (otherSetting?.isEnabled) {
+          await upsertIntegrationSetting(
+            otherKey,
+            (otherSetting.value ?? {}) as Record<string, unknown>,
+            false,
+            user.id,
+          );
+        }
       }
     }
 

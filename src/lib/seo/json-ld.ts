@@ -30,7 +30,7 @@ export function buildOrganizationJsonLd() {
       postalCode: siteConfig.postalCode,
       addressCountry: "IN",
     },
-    sameAs: Object.values(siteConfig.social),
+    sameAs: Object.values(siteConfig.social).filter(Boolean),
   };
 }
 
@@ -117,7 +117,7 @@ export function buildProductJsonLd(input: {
     "@type": "Product",
     name: input.name,
     description:
-      input.description ?? `Buy ${input.name} from Sri Palani Textiles.`,
+      input.description ?? `Buy ${input.name} from ${siteConfig.name}.`,
     image: input.imageUrl ? [input.imageUrl] : undefined,
     sku: input.slug,
     brand: {

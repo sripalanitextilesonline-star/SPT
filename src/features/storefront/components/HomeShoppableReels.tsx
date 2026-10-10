@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { StorefrontImage } from "@/components/media/StorefrontImage";
 import { ShoppingBag } from "lucide-react";
 import { DocumentType } from "@/gql";
 import { ViewTransitionLink } from "@/components/ui/ViewTransitionLink";
@@ -17,7 +17,7 @@ import {
   productImageTransitionName,
   viewTransitionStyle,
 } from "@/lib/view-transitions";
-import { cn, getStorefrontImageProps, keytoUrl } from "@/lib/utils";
+import { cn, keytoUrl } from "@/lib/utils";
 
 type ProductNode = DocumentType<typeof HomeFeaturedProductFragment>;
 
@@ -41,15 +41,15 @@ function ReelProductCard({
   return (
     <ViewTransitionLink href={`/shop/${slug}`} className="group block w-full">
       <article className="relative aspect-[9/16] w-full min-h-[220px] overflow-hidden rounded-2xl border border-brand-teal/25 bg-muted shadow-[0_16px_40px_-20px_rgba(72,168,180,0.4)]">
-        <Image
+        <StorefrontImage
           src={imageSrc}
           alt={featuredImage.alt || name}
           fill
           sizes="(max-width: 640px) 45vw, 220px"
+          optimizeWidth={400}
           className="object-cover object-top transition-transform duration-500 group-hover:scale-[1.05]"
           style={viewTransitionStyle(productImageTransitionName(id))}
           loading="lazy"
-          {...getStorefrontImageProps(imageSrc)}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 z-[2] p-3 pt-12">
@@ -58,7 +58,9 @@ function ReelProductCard({
           </p>
           <ProductPriceDisplay
             product={product}
-            className="mt-1 craft-price-pill--frost text-white [&_span]:text-white [&_s]:text-white/70"
+            className="mt-1 craft-price-pill--frost"
+            saleClassName="text-base font-extrabold text-white"
+            originalClassName="text-xs font-medium text-white/80 line-through"
           />
           {packLabel ? (
             <p className="mt-0.5 text-xs font-medium text-white/85">

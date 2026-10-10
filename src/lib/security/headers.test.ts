@@ -9,7 +9,7 @@ describe("security headers", () => {
     const byKey = Object.fromEntries(headers.map((h) => [h.key, h.value]));
 
     expect(byKey["Strict-Transport-Security"]).toContain("max-age=63072000");
-    expect(byKey["Permissions-Policy"]).toContain("camera=()");
+    expect(byKey["Permissions-Policy"]).toContain("camera=(self)");
     expect(byKey["X-Content-Type-Options"]).toBe("nosniff");
     expect(byKey["Content-Security-Policy-Report-Only"]).toBe(
       CONTENT_SECURITY_POLICY,
@@ -24,11 +24,49 @@ describe("security headers", () => {
     expect(byKey["Content-Security-Policy-Report-Only"]).toBeUndefined();
   });
 
+  it("never ships 'unsafe-eval' in production CSP, only when dev opts in", () => {
+    expect(CONTENT_SECURITY_POLICY).not.toContain("'unsafe-eval'");
+    const prod = buildNextSecurityHeaders({ enforceCsp: true });
+    expect(
+      prod.find((h) => h.key === "Content-Security-Policy")?.value,
+    ).not.toContain("'unsafe-eval'");
+
+    const dev = buildNextSecurityHeaders({
+      enforceCsp: true,
+      allowDevEval: true,
+    });
+    const devScriptSrc = dev
+      .find((h) => h.key === "Content-Security-Policy")
+      ?.value.match(/script-src ([^;]+);/)?.[1];
+    expect(devScriptSrc).toContain("'self' 'unsafe-eval'");
+  });
+
   it("allows Cashfree SDK and Supabase in the CSP allowlist", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("https://sdk.cashfree.com");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://checkout.razorpay.com");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://cdn.razorpay.com");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://*.razorpay.com");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://api.razorpay.com");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.supabase.co");
     expect(CONTENT_SECURITY_POLICY).toContain("https://*.ingest.sentry.io");
     expect(CONTENT_SECURITY_POLICY).toContain("worker-src 'self' blob:");
-    expect(CONTENT_SECURITY_POLICY).toContain("frame-ancestors 'self'");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://www.clarity.ms");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://scripts.clarity.ms");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://*.clarity.ms");
+    expect(CONTENT_SECURITY_POLICY).toContain("https://c.bing.com");
+    expect(CONTENT_SECURITY_POLICY).toContain(
+      "https://*.r2.cloudflarestorage.com",
+    );
+    expect(CONTENT_SECURITY_POLICY).toContain(
+      "https://media.sripalanitextiles.com",
+    );
+  });
+
+  it("allows the Cloudflare Web Analytics beacon (script + RUM endpoint)", () => {
+    const scriptSrc = CONTENT_SECURITY_POLICY.match(/script-src ([^;]+);/)?.[1];
+    const connectSrc =
+      CONTENT_SECURITY_POLICY.match(/connect-src ([^;]+);/)?.[1];
+    expect(scriptSrc).toContain("https://static.cloudflareinsights.com");
+    expect(connectSrc).toContain("https://cloudflareinsights.com");
   });
 });

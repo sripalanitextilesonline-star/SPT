@@ -2,24 +2,16 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { FileDown, Loader2 } from "lucide-react";
 
+import { AdminTableSearch } from "@/components/admin/AdminTableSearch";
 import AdminOrdersList from "@/features/orders/components/admin/AdminOrdersList";
 import type { AdminOrderListView } from "@/lib/admin/getAdminOrdersList";
 import { clampAdminOrdersPageSize } from "@/lib/admin/admin-orders-pagination";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
-import {
-  adminOrdersToPdfLabels,
-  adminOrdersToPackingSlips,
-} from "@/lib/pdf/admin-order-pdf-label";
-import {
-  downloadOrdersPdf,
-  PdfAddressTooLongError,
-} from "@/lib/pdf/shipping-label-pdf";
-import { downloadOrdersPdf as downloadPackingSlipsPdf } from "@/lib/pdf/packing-slip-pdf";
+import { downloadAdminOrdersPackingSlipsPdf } from "@/lib/pdf/download-packing-slip.client";
 import { cn } from "@/lib/utils";
 
 export type OrdersSegment = "paid" | "unpaid";
@@ -40,6 +32,7 @@ type Props = {
   unpaidPageParam: string;
   pageSizeParam: string;
   resetPageParams: string[];
+  appliedQuery: string;
 };
 
 const ORDERS_PATH = "/admin/orders";
@@ -55,22 +48,18 @@ export function parseOrdersSegment(
   return raw === "unpaid" || raw === "pending" ? "unpaid" : "paid";
 }
 
-export function segmentHref(nextSegment: OrdersSegment, pageSize: number) {
+export function segmentHref(
+  nextSegment: OrdersSegment,
+  pageSize: number,
+  query = "",
+) {
   const params = new URLSearchParams();
   params.set("status", nextSegment);
-  // Keep shared page size; reset per-segment pages by omitting them.
+  // Keep shared page size and search; reset per-segment pages by omitting them.
   if (pageSize > 0) params.set("pageSize", String(pageSize));
+  const q = query.trim();
+  if (q) params.set("q", q);
   return `${ORDERS_PATH}?${params.toString()}`;
-}
-
-function OrdersListSkeleton() {
-  return (
-    <div className="space-y-3" aria-busy="true" aria-live="polite">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <Skeleton key={index} className="h-24 w-full rounded-lg" />
-      ))}
-    </div>
-  );
 }
 
 export function AdminOrdersSegmentTabs({
@@ -82,84 +71,123 @@ export function AdminOrdersSegmentTabs({
   unpaidPageParam,
   pageSizeParam,
   resetPageParams,
+  appliedQuery,
 }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { toast } = useToast();
+  const [isNavPending, startNavTransition] = React.useTransition();
+  const [pendingSegment, setPendingSegment] =
+    React.useState<OrdersSegment | null>(null);
   const [downloadingBulkPdf, setDownloadingBulkPdf] = React.useState(false);
-  const [downloadingBulkSlip, setDownloadingBulkSlip] = React.useState(false);
-  const [loadingTo, setLoadingTo] = React.useState<OrdersSegment | null>(null);
   const [navError, setNavError] = React.useState<string | null>(null);
+  const [draftQuery, setDraftQuery] = React.useState(appliedQuery);
+  const [isSearchPending, startSearchTransition] = React.useTransition();
 
-  const urlSegment = parseOrdersSegment(searchParams?.get("status"));
+  React.useEffect(() => {
+    setDraftQuery(appliedQuery);
+  }, [appliedQuery]);
+
+  // Server `segment` prop is source of truth — do not use useSearchParams()
+  // (it suspends without Suspense and kept /admin/orders on loading.tsx forever).
   const pageSize = clampAdminOrdersPageSize(
-    Number.parseInt(String(searchParams?.get(pageSizeParam) ?? ""), 10) ||
-      paid.pageSize ||
-      unpaid.pageSize ||
-      undefined,
+    paid.pageSize || unpaid.pageSize || undefined,
   );
 
-  // Props caught up with the URL — navigation succeeded.
   React.useEffect(() => {
-    if (segment === urlSegment) {
-      setLoadingTo((current) =>
-        current == null || current === segment ? null : current,
-      );
+    if (pendingSegment == null) return;
+    if (segment === pendingSegment) {
+      setPendingSegment(null);
       setNavError(null);
     }
-  }, [segment, urlSegment]);
+  }, [pendingSegment, segment]);
 
-  // Stall watchdog: never leave the unpaid/paid switch hanging forever.
   React.useEffect(() => {
-    if (loadingTo == null && segment === urlSegment) return;
-    const waitingFor = loadingTo ?? urlSegment;
+    if (pendingSegment == null) return;
+    const waitingFor = pendingSegment;
     const timer = window.setTimeout(() => {
-      // Still out of sync after timeout — surface retry instead of blank/stuck UI.
-      if (segment !== waitingFor) {
-        setNavError(
-          `Could not load ${waitingFor} orders. Check your connection and retry.`,
-        );
-        setLoadingTo(null);
-      }
+      setNavError(
+        `Could not load ${waitingFor} orders. Check your connection and retry.`,
+      );
+      setPendingSegment(null);
     }, NAV_STALL_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [loadingTo, segment, urlSegment]);
+  }, [pendingSegment]);
 
-  const displaySegment = loadingTo ?? urlSegment;
-  const dataReady = segment === urlSegment && loadingTo == null;
-  const isLoading = !dataReady;
+  const displaySegment = pendingSegment ?? segment;
+  const isLoading = pendingSegment != null || isNavPending || isSearchPending;
+  const staleList = segment === "unpaid" ? unpaid : paid;
   const active = segment === "unpaid" ? unpaid : paid;
-  const showPdfToolbar = dataReady && segment === "paid";
+  const listSource = isLoading ? staleList : active;
+  const showPdfToolbar = segment === "paid";
 
   const navigateTo = React.useCallback(
     (next: OrdersSegment) => {
-      if (next === segment && next === urlSegment && loadingTo == null) return;
+      if (next === segment && pendingSegment == null && !isNavPending) return;
       setNavError(null);
-      setLoadingTo(next);
-      const href = segmentHref(next, pageSize);
-      router.push(href, { scroll: false });
-      // Force RSC refetch — soft Link nav alone can stall on searchParam switches.
-      router.refresh();
+      setPendingSegment(next);
+      const href = segmentHref(next, pageSize, appliedQuery);
+      startNavTransition(() => {
+        router.push(href, { scroll: false });
+      });
     },
-    [loadingTo, pageSize, router, segment, urlSegment],
+    [
+      appliedQuery,
+      isNavPending,
+      pageSize,
+      pendingSegment,
+      router,
+      segment,
+      startNavTransition,
+    ],
   );
+
+  const retryNavigation = React.useCallback(() => {
+    setNavError(null);
+    const target = pendingSegment ?? segment;
+    setPendingSegment(target);
+    startNavTransition(() => {
+      router.push(segmentHref(target, pageSize, appliedQuery), {
+        scroll: false,
+      });
+    });
+  }, [
+    appliedQuery,
+    pageSize,
+    pendingSegment,
+    router,
+    segment,
+    startNavTransition,
+  ]);
+
+  const applySearch = React.useCallback(
+    (value?: string) => {
+      const next = (value ?? draftQuery).trim();
+      setDraftQuery(next);
+      startSearchTransition(() => {
+        router.push(segmentHref(segment, pageSize, next), { scroll: false });
+      });
+    },
+    [draftQuery, pageSize, router, segment, startSearchTransition],
+  );
+
+  const clearSearch = React.useCallback(() => {
+    setDraftQuery("");
+    startSearchTransition(() => {
+      router.push(segmentHref(segment, pageSize), { scroll: false });
+    });
+  }, [pageSize, router, segment, startSearchTransition]);
 
   const downloadBulkPdf = React.useCallback(async () => {
     if (downloadingBulkPdf || paid.rows.length === 0) return;
     setDownloadingBulkPdf(true);
     try {
-      await downloadOrdersPdf(adminOrdersToPdfLabels(paid.rows));
+      await downloadAdminOrdersPackingSlipsPdf(paid.rows);
       toast({
         title: "PDF downloaded",
-        description: `Shipping labels for ${paid.rows.length} paid order${paid.rows.length === 1 ? "" : "s"} on this page.`,
+        description: `Packing slips for ${paid.rows.length} paid order${paid.rows.length === 1 ? "" : "s"} on this page.`,
       });
     } catch (error) {
-      const message =
-        error instanceof PdfAddressTooLongError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : "Unknown error";
+      const message = error instanceof Error ? error.message : "Unknown error";
       toast({
         title: "Failed to generate PDF",
         description: message,
@@ -170,26 +198,6 @@ export function AdminOrdersSegmentTabs({
     }
   }, [downloadingBulkPdf, paid.rows, toast]);
 
-  const downloadBulkSlip = React.useCallback(async () => {
-    if (downloadingBulkSlip || paid.rows.length === 0) return;
-    setDownloadingBulkSlip(true);
-    try {
-      await downloadPackingSlipsPdf(adminOrdersToPackingSlips(paid.rows));
-      toast({
-        title: "Packing slips downloaded",
-        description: `Packing slips for ${paid.rows.length} paid order${paid.rows.length === 1 ? "" : "s"} on this page.`,
-      });
-    } catch (error) {
-      toast({
-        title: "Failed to generate packing slips",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setDownloadingBulkSlip(false);
-    }
-  }, [downloadingBulkSlip, paid.rows, toast]);
-
   return (
     <div className="space-y-4">
       <div
@@ -198,7 +206,7 @@ export function AdminOrdersSegmentTabs({
         aria-label="Order payment status"
       >
         <Link
-          href={segmentHref("paid", pageSize)}
+          href={segmentHref("paid", pageSize, appliedQuery)}
           replace
           scroll={false}
           prefetch
@@ -236,7 +244,7 @@ export function AdminOrdersSegmentTabs({
         </Link>
 
         <Link
-          href={segmentHref("unpaid", pageSize)}
+          href={segmentHref("unpaid", pageSize, appliedQuery)}
           replace
           scroll={false}
           prefetch
@@ -274,6 +282,20 @@ export function AdminOrdersSegmentTabs({
         </Link>
       </div>
 
+      <AdminTableSearch
+        entityLabel="orders"
+        placeholder="Order ID, ref, name or mobile"
+        emptyResultHint="try the other tab or a shorter search"
+        layout="compact"
+        appliedQuery={appliedQuery}
+        draftQuery={draftQuery}
+        onDraftQueryChange={setDraftQuery}
+        onApplySearch={applySearch}
+        onClearSearch={clearSearch}
+        filteredCount={active.totalCount}
+        totalCount={counts.paid + counts.pending}
+      />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           {isLoading ? (
@@ -303,38 +325,21 @@ export function AdminOrdersSegmentTabs({
         </p>
 
         {showPdfToolbar ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void downloadBulkPdf()}
-              disabled={downloadingBulkPdf || paid.rows.length === 0}
-              title="Download shipping labels for paid orders on this page"
-            >
-              {downloadingBulkPdf ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FileDown className="mr-2 h-4 w-4" />
-              )}
-              {downloadingBulkPdf ? "Generating…" : "Labels"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void downloadBulkSlip()}
-              disabled={downloadingBulkSlip || paid.rows.length === 0}
-              title="Download packing slips for paid orders on this page"
-            >
-              {downloadingBulkSlip ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <FileDown className="mr-2 h-4 w-4" />
-              )}
-              {downloadingBulkSlip ? "Generating…" : "Slips"}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void downloadBulkPdf()}
+            disabled={downloadingBulkPdf || paid.rows.length === 0}
+            title="Download packing slips PDF for paid orders on this page"
+          >
+            {downloadingBulkPdf ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <FileDown className="mr-2 h-4 w-4" />
+            )}
+            {downloadingBulkPdf ? "Generating…" : "PDF"}
+          </Button>
         ) : null}
       </div>
 
@@ -345,33 +350,37 @@ export function AdminOrdersSegmentTabs({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => navigateTo(urlSegment)}
+            onClick={retryNavigation}
           >
             Retry
           </Button>
         </div>
       ) : null}
 
-      {isLoading ? (
-        <OrdersListSkeleton />
-      ) : (
+      <div
+        className={cn(isLoading && "pointer-events-none opacity-60")}
+        aria-busy={isLoading}
+        aria-live="polite"
+      >
         <AdminOrdersList
           key={segment}
-          orders={active.rows}
-          totalCount={active.totalCount}
-          page={active.page}
-          pageSize={active.pageSize}
+          orders={listSource.rows}
+          totalCount={listSource.totalCount}
+          page={listSource.page}
+          pageSize={listSource.pageSize}
           pageParam={segment === "unpaid" ? unpaidPageParam : paidPageParam}
           pageSizeParam={pageSizeParam}
           resetPageParams={resetPageParams}
-          enablePdf={segment === "paid"}
+          enablePdf={segment === "paid" && !isLoading}
           emptyMessage={
-            segment === "unpaid"
-              ? "No unpaid orders right now."
-              : "No paid orders yet."
+            appliedQuery
+              ? `No ${segment === "unpaid" ? "unpaid" : "paid"} orders match "${appliedQuery}".`
+              : segment === "unpaid"
+                ? "No unpaid orders right now."
+                : "No paid orders yet."
           }
         />
-      )}
+      </div>
     </div>
   );
 }

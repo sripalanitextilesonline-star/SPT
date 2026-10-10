@@ -54,7 +54,7 @@ async function recoverProductById(id: string) {
 
 /**
  * Insert a product with **one statement** on the default 6543 client.
- * postgres.js `BEGIN` crashes on the transaction pooler (onclose / queue).
+ * postgres.js `BEGIN` crashes on both pooler ports here (onclose / queue).
  * Unique races retry with a new code; socket faults recover by the client-generated id.
  */
 export async function insertProductWithoutTransaction(

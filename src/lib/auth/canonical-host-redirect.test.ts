@@ -3,7 +3,7 @@ import { buildCanonicalRedirectUrl } from "./canonical-host-redirect";
 const CANONICAL = "https://example.com";
 
 describe("buildCanonicalRedirectUrl", () => {
-  it("redirects workers.dev to the custom domain", () => {
+  it("redirects workers.dev to the canonical origin", () => {
     expect(
       buildCanonicalRedirectUrl(
         "https://sri-palani-textiles.workers.dev/shop",
@@ -63,7 +63,7 @@ describe("buildCanonicalRedirectUrl", () => {
     ).toBeNull();
   });
 
-  it("does not redirect when canonical is still workers.dev", () => {
+  it("does not redirect 127.0.0.1", () => {
     expect(
       buildCanonicalRedirectUrl(
         "https://sri-palani-textiles.workers.dev/",

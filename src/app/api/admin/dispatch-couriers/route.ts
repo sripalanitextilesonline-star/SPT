@@ -1,7 +1,7 @@
 import { getSessionUser, isAdminUser } from "@/lib/auth/admin";
 import {
-  logServerError,
   publicValidationPayload,
+  logServerError,
 } from "@/lib/api/public-error";
 import {
   courierNameToIdBase,
@@ -16,13 +16,51 @@ export const dynamic = "force-dynamic";
 
 async function ensureAdmin() {
   const user = await getSessionUser();
-  return user && (await isAdminUser(user)) ? user : null;
+  const admin = await isAdminUser(user);
+  if (!user || !admin) return null;
+  return user;
+}
+
+async function findCourierByNameInsensitive(name: string) {
+  const rows = await db
+    .select({
+      id: dispatchCouriers.id,
+      name: dispatchCouriers.name,
+      trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
+      isActive: dispatchCouriers.isActive,
+    })
+    .from(dispatchCouriers)
+    .where(sql`lower(trim(${dispatchCouriers.name})) = lower(trim(${name}))`)
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+async function buildUniqueCourierId(name: string) {
+  const base = courierNameToIdBase(name);
+  let candidate = base;
+  let suffix = 2;
+
+  while (true) {
+    const existing = await db
+      .select({ id: dispatchCouriers.id })
+      .from(dispatchCouriers)
+      .where(eq(dispatchCouriers.id, candidate))
+      .limit(1);
+
+    if (existing.length === 0) return candidate;
+
+    candidate = `${base}${suffix}`;
+    suffix += 1;
+  }
 }
 
 export async function GET() {
-  if (!(await ensureAdmin())) {
+  const user = await ensureAdmin();
+  if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
+
   const couriers = await db
     .select({
       id: dispatchCouriers.id,
@@ -32,37 +70,33 @@ export async function GET() {
     .from(dispatchCouriers)
     .where(eq(dispatchCouriers.isActive, true))
     .orderBy(asc(dispatchCouriers.name));
+
   return NextResponse.json({ couriers });
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await ensureAdmin())) {
+  const user = await ensureAdmin();
+  if (!user) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
+
   const parsed = parseCreateDispatchCourierPayload(
     await request.json().catch(() => null),
   );
+
   if (parsed.success === false) {
     return NextResponse.json(
       publicValidationPayload("Invalid courier payload", parsed.error),
       { status: 400 },
     );
   }
+
   const { name, trackingUrlTemplate } = parsed.data;
-  const [existing] = await db
-    .select()
-    .from(dispatchCouriers)
-    .where(sql`lower(trim(${dispatchCouriers.name})) = lower(trim(${name}))`)
-    .limit(1);
-  if (existing?.isActive) {
-    return NextResponse.json(
-      { message: `Courier "${existing.name}" already exists.` },
-      { status: 409 },
-    );
-  }
-  try {
-    if (existing) {
-      const [courier] = await db
+
+  const existing = await findCourierByNameInsensitive(name);
+  if (existing) {
+    if (!existing.isActive) {
+      const [reactivated] = await db
         .update(dispatchCouriers)
         .set({
           isActive: true,
@@ -70,30 +104,43 @@ export async function POST(request: NextRequest) {
             trackingUrlTemplate ?? existing.trackingUrlTemplate,
         })
         .where(eq(dispatchCouriers.id, existing.id))
-        .returning();
+        .returning({
+          id: dispatchCouriers.id,
+          name: dispatchCouriers.name,
+          trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
+        });
+
       return NextResponse.json({
-        courier,
+        courier: reactivated,
         created: false,
         reactivated: true,
       });
     }
-    const base = courierNameToIdBase(name);
-    let id = base;
-    for (let suffix = 2; ; suffix += 1) {
-      const [match] = await db
-        .select({ id: dispatchCouriers.id })
-        .from(dispatchCouriers)
-        .where(eq(dispatchCouriers.id, id))
-        .limit(1);
-      if (!match) break;
-      id = `${base}${suffix}`;
-    }
-    const [courier] = await db
+
+    return NextResponse.json(
+      { message: `Courier "${existing.name}" already exists.` },
+      { status: 409 },
+    );
+  }
+
+  try {
+    const id = await buildUniqueCourierId(name);
+    const [created] = await db
       .insert(dispatchCouriers)
-      .values({ id, name, trackingUrlTemplate, isActive: true })
-      .returning();
+      .values({
+        id,
+        name,
+        trackingUrlTemplate,
+        isActive: true,
+      })
+      .returning({
+        id: dispatchCouriers.id,
+        name: dispatchCouriers.name,
+        trackingUrlTemplate: dispatchCouriers.trackingUrlTemplate,
+      });
+
     return NextResponse.json({
-      courier,
+      courier: created,
       created: true,
       reactivated: false,
     });

@@ -4,6 +4,7 @@ import {
   buildPackingSlipRecipientLines,
   buildPackingSlipShopFooter,
   formatPackingSlipDate,
+  formatPackingSlipInternalRef,
   formatPackingSlipOrderHeading,
   formatPackingSlipQuantity,
   resolvePackingSlipShopAddressLines,
@@ -19,7 +20,7 @@ const A4_W = 210;
 const A4_H = 297;
 const MARGIN = 18;
 const THUMB_MM = 12;
-const FALLBACK_IMAGE = "/logo.png";
+const FALLBACK_IMAGE = "/images/sri-palani-textiles-logo.png";
 
 type Doc = {
   addPage: () => void;
@@ -163,6 +164,23 @@ function drawHeader(doc: Doc, order: PackingSlipOrder, y: number): number {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   const rightX = A4_W - MARGIN;
+  const internalLine = formatPackingSlipInternalRef(order.internalRef);
+  if (internalLine) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text(internalLine, rightX, y, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(formatPackingSlipOrderHeading(order.id), rightX, y + 6, {
+      align: "right",
+    });
+    doc.text(formatPackingSlipDate(order.createdAt), rightX, y + 11, {
+      align: "right",
+    });
+    doc.setFontSize(10);
+    return y + 22;
+  }
+
   doc.text(formatPackingSlipOrderHeading(order.id), rightX, y, {
     align: "right",
   });
@@ -279,6 +297,7 @@ async function drawPackingSlip(
   y = drawAddresses(doc, order, y);
   y += 4;
   y = drawItemHeader(doc, y);
+  // Printed sheet: ITEMS / QUANTITY sit on a full-width rule, then product rows.
   drawRule(doc, y);
   y += 7;
 
@@ -290,7 +309,14 @@ async function drawPackingSlip(
     const nameLines = doc
       .splitTextToSize(item.name || "Item", nameWidth)
       .slice(0, 2);
-    const rowH = Math.max(THUMB_MM + 5, nameLines.length * 5 + 6);
+    const variantLines = doc
+      .splitTextToSize(
+        `Variant: ${item.variantLabel?.trim() || "Standard"}`,
+        nameWidth,
+      )
+      .slice(0, 2);
+    const textBlockLines = nameLines.length + variantLines.length;
+    const rowH = Math.max(THUMB_MM + 5, textBlockLines * 5 + 6);
     y = ensureSpace(doc, y, rowH);
     const thumb = thumbs[i];
     if (thumb) {
@@ -303,6 +329,17 @@ async function drawPackingSlip(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.text(nameLines, MARGIN + THUMB_MM + 4, y + 2);
+    if (variantLines.length > 0) {
+      doc.setFontSize(8);
+      doc.setTextColor(90, 90, 90);
+      doc.text(
+        variantLines,
+        MARGIN + THUMB_MM + 4,
+        y + 2 + nameLines.length * 5,
+      );
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+    }
     doc.text(formatPackingSlipQuantity(item.quantity), A4_W - MARGIN, y + 2, {
       align: "right",
     });
@@ -333,7 +370,13 @@ export async function downloadOrdersPdf(orders: PackingSlipOrder[]) {
   const shopAddressLines = await fetchAdminShopAddressLines();
   const doc = new jsPDF({ unit: "mm", format: "a4" }) as unknown as Doc;
   for (let i = 0; i < orders.length; i++) {
-    if (i > 0) doc.addPage();
+    if (i > 0) {
+      doc.addPage();
+      // Yield between pages so clicks/tabs stay responsive during bulk PDF.
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 0);
+      });
+    }
     await drawPackingSlip(doc, orders[i], shopAddressLines);
   }
   const blob = doc.output("blob");

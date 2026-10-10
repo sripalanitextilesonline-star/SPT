@@ -8,6 +8,8 @@ import db from "@/lib/supabase/db";
 import { mapProductSaveError } from "@/lib/supabase/pooler-errors";
 import { withRetry } from "@/lib/resilience";
 import { InsertProducts, products } from "@/lib/supabase/schema";
+import { deleteObjects } from "@/lib/s3";
+import { isValidDigitalObjectKey } from "@/lib/products/digital-product";
 import { eq } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 
@@ -62,6 +64,12 @@ function toWritableProductFields(
     discountPercent: normalized.discountPercent,
     soldAsPack: normalized.soldAsPack,
     packSize: normalized.packSize,
+    weightKg: normalized.weightKg,
+    isDigital: Boolean(normalized.isDigital),
+    digitalFileKey: normalized.digitalFileKey ?? null,
+    digitalFileName: normalized.digitalFileName ?? null,
+    digitalFileSize: normalized.digitalFileSize ?? null,
+    digitalContentType: normalized.digitalContentType ?? null,
     featuredImageId,
     tags: [] as string[],
     images: Array.isArray(normalized.images) ? normalized.images : [],
@@ -131,6 +139,7 @@ export async function updateProductRecord(
           .select({
             slug: products.slug,
             productCode: products.productCode,
+            digitalFileKey: products.digitalFileKey,
           })
           .from(products)
           .where(eq(products.id, productId))
@@ -175,6 +184,20 @@ export async function updateProductRecord(
       },
       { label: "product-update" },
     );
+
+    const previousKey = String(existing.digitalFileKey ?? "").trim();
+    const nextKey = String(values.digitalFileKey ?? "").trim();
+    if (
+      previousKey &&
+      previousKey !== nextKey &&
+      isValidDigitalObjectKey(previousKey)
+    ) {
+      try {
+        await deleteObjects({ keys: [previousKey] });
+      } catch (error) {
+        console.error("[products] digital file cleanup failed:", error);
+      }
+    }
 
     try {
       await syncProductGalleryImages(productId, orderedMediaIds);

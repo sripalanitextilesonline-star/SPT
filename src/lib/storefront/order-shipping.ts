@@ -38,3 +38,23 @@ export const ORDER_SHIPPING_FALLBACK = {
   email: "",
   whatsappPhoneDigits: "919092467372",
 } as const;
+
+/** Shared returns / exchange copy — keep every storefront surface in sync. */
+export const ORDER_RETURNS = {
+  windowDays: 7,
+  summary:
+    "Returns or exchanges may be accepted within 7 days of delivery for unused items with original packaging intact.",
+  /** Short blurb for PDP accordion / trust strip */
+  short:
+    "Returns or exchanges may be accepted within 7 days for unused items with packaging; please call before returning.",
+  faqAnswer:
+    "Unused items in original condition may be returned within 7 days. Please read our Shipping & Returns page and contact us before sending anything back.",
+  trustTitle: "Easy Replacement",
+  trustDescription: "Simple returns on eligible items.",
+  rules: [
+    "Please call or WhatsApp us before sending any item back.",
+    "Customised, opened, or used items cannot be returned.",
+    "Shipping charges for returns may apply unless the item is faulty.",
+  ] as const,
+  fullDetailsHref: "/shipping-returns",
+} as const;

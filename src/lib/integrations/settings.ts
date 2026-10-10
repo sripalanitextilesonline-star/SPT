@@ -3,7 +3,11 @@ import { parseAnnouncementItems } from "@/lib/announcements/parse";
 import {
   calculateCourierCharge,
   calculateGstAmount,
+  getGstInclusiveFactor,
+  toGstInclusiveAmount,
+  buildCheckoutMoneyTotals,
   normalizeStateForCourier,
+  parseCourierWeightSettings,
   type CourierChargeBreakdown,
   type CourierChargesConfig,
 } from "@/lib/courier/calculate";
@@ -39,6 +43,7 @@ import { keytoUrl } from "@/lib/utils";
 export const INTEGRATION_KEYS = {
   cashfree: "cashfree",
   phonepe: "phonepe",
+  razorpay: "razorpay",
   whatsapp: "whatsapp",
   storefrontSocial: "storefront_social",
   storefrontContact: "storefront_contact",
@@ -144,7 +149,14 @@ export type StockControlConfig = {
   lowStockThreshold: number;
 };
 export type { CourierChargeBreakdown, CourierChargesConfig };
-export { calculateCourierCharge, calculateGstAmount, normalizeStateForCourier };
+export {
+  calculateCourierCharge,
+  calculateGstAmount,
+  getGstInclusiveFactor,
+  toGstInclusiveAmount,
+  buildCheckoutMoneyTotals,
+  normalizeStateForCourier,
+};
 export type OfferCodeItem = {
   code: string;
   percentage: number;
@@ -327,6 +339,7 @@ export async function resolveCourierChargesConfig(): Promise<CourierChargesConfi
         value.gstPercentage,
         DEFAULT_COURIER_CONFIG.gstPercentage,
       ),
+      ...parseCourierWeightSettings(value),
     };
   } catch (error) {
     console.error("[settings] resolveCourierChargesConfig failed:", error);
@@ -434,11 +447,22 @@ export type CashfreeConfig = {
   enabled: boolean;
 };
 
+export type RazorpayConfig = {
+  keyId: string;
+  keySecret: string;
+  webhookSecret: string;
+  environment: "sandbox" | "production";
+  enabled: boolean;
+};
+
 export type WhatsAppConfig = {
   accessToken: string;
   phoneNumberId: string;
   templateName?: string;
   templateLanguage?: string;
+  /** Approved Meta template for unpaid-cart recovery (body: name, amount, link). */
+  abandonedTemplateName?: string;
+  abandonedTemplateLanguage?: string;
   notifySeller: boolean;
   sellerMobiles: string[];
   enabled: boolean;
@@ -618,6 +642,7 @@ function parseCourierFromRow(
       value.gstPercentage,
       DEFAULT_COURIER_CONFIG.gstPercentage,
     ),
+    ...parseCourierWeightSettings(value),
   };
 }
 
@@ -727,6 +752,31 @@ export async function upsertIntegrationSetting(
     });
 }
 
+export async function getRazorpayConfig(): Promise<RazorpayConfig | null> {
+  const setting = await getIntegrationSetting(INTEGRATION_KEYS.razorpay);
+  if (!setting || !setting.isEnabled) return null;
+
+  const value = setting.value as Record<string, unknown>;
+  const keyId = String(value.keyId ?? "").trim();
+  const keySecret = String(value.keySecret ?? "").trim();
+  const webhookSecret = String(value.webhookSecret ?? "").trim();
+  const environmentRaw = String(value.environment ?? "sandbox")
+    .trim()
+    .toLowerCase();
+  const environment =
+    environmentRaw === "production" ? "production" : "sandbox";
+
+  if (!keyId || !keySecret) return null;
+
+  return {
+    keyId,
+    keySecret,
+    webhookSecret,
+    environment,
+    enabled: true,
+  };
+}
+
 export async function getPhonePeConfig(): Promise<PhonePeConfig | null> {
   const setting = await getIntegrationSetting(INTEGRATION_KEYS.phonepe);
   if (!setting || !setting.isEnabled) return null;
@@ -787,6 +837,18 @@ export async function getWhatsAppConfig(): Promise<WhatsAppConfig | null> {
     templateName: String(value.templateName ?? "").trim(),
     templateLanguage:
       String(value.templateLanguage ?? "en")
+        .trim()
+        .toLowerCase() || "en",
+    abandonedTemplateName: String(
+      value.abandonedTemplateName ?? value.abandoned_template_name ?? "",
+    ).trim(),
+    abandonedTemplateLanguage:
+      String(
+        value.abandonedTemplateLanguage ??
+          value.abandoned_template_language ??
+          value.templateLanguage ??
+          "en",
+      )
         .trim()
         .toLowerCase() || "en",
     notifySeller,

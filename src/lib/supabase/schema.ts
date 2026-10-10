@@ -153,11 +153,18 @@ export type InsertPaymentWebhookEvents = InferInsertModel<
 export const carts = pgTable(
   "carts",
   {
+    id: text("id")
+      .notNull()
+      .primaryKey()
+      .$defaultFn(() => createId()),
     quantity: integer("quantity").notNull(),
     productId: text("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     userId: uuid("user_id").notNull(),
+    size: text("size"),
+    selections: jsonRecordNullable("selections"),
+    variantKey: text("variant_key").notNull().default("default"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -167,10 +174,11 @@ export const carts = pgTable(
   },
   (table) => {
     return {
-      pkWithCustomName: primaryKey({
-        name: "user_poduct_cart_id",
-        columns: [table.userId, table.productId],
-      }),
+      userProductVariantUid: uniqueIndex("user_product_variant_cart_uid").on(
+        table.userId,
+        table.productId,
+        table.variantKey,
+      ),
       product: foreignKey({
         columns: [table.productId],
         foreignColumns: [products.id],
@@ -293,6 +301,10 @@ export const products = pgTable(
     soldAsPack: boolean("sold_as_pack").notNull().default(false),
     /** Pieces per pack when soldAsPack; null/ignored when off. */
     packSize: integer("pack_size"),
+    /** Shipping weight of one unit (kg); drives weight-based courier. */
+    weightKg: decimal("weight_kg", { precision: 8, scale: 3 })
+      .notNull()
+      .default("0.5"),
     totalComments: integer("totalComments").default(0).notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
@@ -315,6 +327,11 @@ export const products = pgTable(
     featuredImageId: text("featured_image_id")
       .notNull()
       .references(() => medias.id, { onDelete: "restrict" }),
+    isDigital: boolean("is_digital").notNull().default(false),
+    digitalFileKey: text("digital_file_key"),
+    digitalFileName: text("digital_file_name"),
+    digitalFileSize: integer("digital_file_size"),
+    digitalContentType: text("digital_content_type"),
   },
   (table) => {
     return {
@@ -380,6 +397,8 @@ export const orders = pgTable(
       mode: "string",
     }),
     payment_meta: jsonRecordNullable("payment_meta"),
+    /** Human invoice-style ref YYMM#### — assigned on first paid transition. */
+    internal_ref: text("internal_ref"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
     })
@@ -452,11 +471,13 @@ export const orderDispatchEvents = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => ({
-    orderUnique: uniqueIndex("order_dispatch_events_order_id_unique").on(
-      table.orderId,
-    ),
-  }),
+  (table) => {
+    return {
+      orderUnique: uniqueIndex("order_dispatch_events_order_id_unique").on(
+        table.orderId,
+      ),
+    };
+  },
 );
 
 export type SelectOrderDispatchEvents = InferSelectModel<
@@ -483,8 +504,13 @@ export const orderLines = pgTable(
     productSlugSnapshot: text("product_slug_snapshot"),
     productCodeSnapshot: text("product_code_snapshot"),
     productImageKeySnapshot: text("product_image_key_snapshot"),
+    isDigitalSnapshot: boolean("is_digital_snapshot").notNull().default(false),
+    digitalFileKeySnapshot: text("digital_file_key_snapshot"),
+    digitalFileNameSnapshot: text("digital_file_name_snapshot"),
     quantity: integer("quantity").notNull(),
     price: decimal("price", { precision: 8, scale: 2 }).notNull(),
+    size: text("size"),
+    selections: jsonRecordNullable("selections"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
     })

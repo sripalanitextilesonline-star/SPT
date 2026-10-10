@@ -21,8 +21,9 @@ export function HomeHeroBanner() {
             alt={`${siteConfig.name} — silk sarees`}
             fill
             priority
+            unoptimized
             sizes="(max-width: 768px) 100vw, 1200px"
-            className="object-cover object-[center_25%] sm:object-center"
+            className="object-cover object-center"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent" />
           <div className="absolute bottom-4 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-auto">

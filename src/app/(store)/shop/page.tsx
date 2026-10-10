@@ -4,11 +4,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { SearchProductsGridSkeleton } from "@/features/products";
 import {
   FilterSelections,
+  ListingFilterNavigationProvider,
   SearchProductsInifiteScroll,
 } from "@/features/search";
 import { SectionErrorNotice } from "@/components/errors/SectionErrorNotice";
 import { STOREFRONT_REVALIDATE_SECONDS } from "@/lib/cache/constants";
 import { getProductPackLabelsByIds } from "@/lib/products/pack.server";
+import { getProductSizePreviewsByIds } from "@/lib/products/sizeConfig";
 import { withFallback } from "@/lib/resilience";
 import { getAllCollectionsCached } from "@/lib/storefront/collections-list";
 import { getDraftProductIdsSafe } from "@/lib/storefront/draft-product-ids";
@@ -22,8 +24,11 @@ import {
 } from "@/lib/storefront/search-params";
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { buildSocialImages } from "@/lib/seo/social-image";
 
 export const revalidate = 300;
+
+const shopSocial = buildSocialImages(null, "Sri Palani Textiles");
 
 export const metadata: Metadata = {
   title: "Shop All Products",
@@ -37,6 +42,13 @@ export const metadata: Metadata = {
     description:
       "Browse all silk, cotton, wedding and festive craft supplies at Sri Palani Textiles.",
     url: "/shop",
+    ...shopSocial.openGraph,
+  },
+  twitter: {
+    ...shopSocial.twitter,
+    title: "Shop All Products | Sri Palani Textiles",
+    description:
+      "Browse all silk, cotton, wedding and festive sarees at Sri Palani Textiles.",
   },
 };
 
@@ -69,7 +81,10 @@ async function ProductsPage({ searchParams }: ProductsPageProps) {
     initialSearchResult?.productsCollection?.edges?.map(
       ({ node }) => node.id,
     ) ?? [];
-  const initialPackLabels = await getProductPackLabelsByIds(initialProductIds);
+  const [initialPackLabels, initialSizePreviews] = await Promise.all([
+    getProductPackLabelsByIds(initialProductIds),
+    getProductSizePreviewsByIds(initialProductIds),
+  ]);
 
   const collectionsSection =
     collectionsData?.edges?.map(({ node }) => ({
@@ -88,31 +103,34 @@ async function ProductsPage({ searchParams }: ProductsPageProps) {
         }
       />
 
-      <Suspense
-        fallback={
-          <div>
-            <Skeleton className="mb-3 h-8 max-w-xl" />
-            <Skeleton className="h-8 max-w-2xl" />
-          </div>
-        }
-      >
-        <FilterSelections collectionsSection={collectionsSection} />
-      </Suspense>
-
-      {productsUnavailable ? (
-        <SectionErrorNotice
-          title="We could not load products right now"
-          description="Our catalogue is briefly unavailable. Please try again in a moment."
-        />
-      ) : (
-        <Suspense fallback={<SearchProductsGridSkeleton />}>
-          <SearchProductsInifiteScroll
-            initialSearchResult={initialSearchResult}
-            initialDraftIds={initialDraftIds ?? []}
-            initialPackLabels={initialPackLabels}
-          />
+      <ListingFilterNavigationProvider>
+        <Suspense
+          fallback={
+            <div>
+              <Skeleton className="mb-3 h-8 max-w-xl" />
+              <Skeleton className="h-8 max-w-2xl" />
+            </div>
+          }
+        >
+          <FilterSelections collectionsSection={collectionsSection} />
         </Suspense>
-      )}
+
+        {productsUnavailable ? (
+          <SectionErrorNotice
+            title="We could not load products right now"
+            description="Our catalogue is briefly unavailable. Please try again in a moment."
+          />
+        ) : (
+          <Suspense fallback={<SearchProductsGridSkeleton />}>
+            <SearchProductsInifiteScroll
+              initialSearchResult={initialSearchResult}
+              initialDraftIds={initialDraftIds ?? []}
+              initialPackLabels={initialPackLabels}
+              initialSizePreviews={initialSizePreviews}
+            />
+          </Suspense>
+        )}
+      </ListingFilterNavigationProvider>
     </Shell>
   );
 }

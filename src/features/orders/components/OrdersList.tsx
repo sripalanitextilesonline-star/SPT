@@ -1,18 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
+import { StorefrontImage } from "@/components/media/StorefrontImage";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { UserOrderListView } from "@/lib/orders/getUserOrdersList";
 import { formatOrderDateTimeIst } from "@/lib/datetime/india";
-import {
-  cn,
-  formatPrice,
-  getStorefrontImageProps,
-  keytoUrl,
-} from "@/lib/utils";
+import { displayInternalOrderRef } from "@/lib/orders/internal-order-ref";
+import { cn, formatPrice, keytoUrl } from "@/lib/utils";
 
 type OrdersListProps = {
   orders: UserOrderListView[];
@@ -47,7 +43,16 @@ function OrdersList({ orders }: OrdersListProps) {
 
             <div>
               <p className="text-xs font-medium">Order</p>
-              <p className="text-sm">#{order.id}</p>
+              {order.internalRef ? (
+                <>
+                  <p className="text-sm font-semibold tabular-nums">
+                    {displayInternalOrderRef(order.internalRef)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">#{order.id}</p>
+                </>
+              ) : (
+                <p className="text-sm">#{order.id}</p>
+              )}
             </div>
           </CardHeader>
 
@@ -70,13 +75,12 @@ function OrdersList({ orders }: OrdersListProps) {
                   return (
                     <div className="flex items-center gap-5" key={line.id}>
                       <div className="relative h-[120px] min-w-[80px] w-[120px] grow">
-                        <Image
+                        <StorefrontImage
                           width={120}
                           height={120}
                           src={imageSrc}
                           alt={line.imageAlt || line.productName}
                           className="h-[120px] w-[120px] object-cover"
-                          {...getStorefrontImageProps(imageSrc)}
                         />
                       </div>
 

@@ -167,13 +167,13 @@ export function VeloKeysForm() {
       "const mediaIds = await uploadImagesParallel([file1, file2, file3, file4]);",
       "await callProductsApi('upsert', `upsert-${Date.now()}`, {",
       "  externalProductId: 'APP-1001',",
-      "  name: 'Soft Silk Saree',",
+      "  name: 'Kolam Stamp',",
       "  description: 'New collection piece',",
       "  collectionId: category.collection.id,",
       "  tags: ['silk', 'festival'],",
       "  badge: 'featured',",
       "  rating: '4',",
-      "  price: '1999',",
+      "  price: '199',",
       "  stock: 1,",
       "  isDraft: false,",
       "  featuredImageMediaId: mediaIds[0],",
@@ -182,9 +182,6 @@ export function VeloKeysForm() {
       "    options: [",
       "      { size: '36', qty: 1 },",
       "      { size: '38', qty: 1 },",
-      "      { size: '40', qty: 1 },",
-      "      { size: '42', qty: 1 },",
-      "      { size: '44', qty: 1 },",
       "    ],",
       "  },",
       "});",
@@ -341,7 +338,7 @@ export function VeloKeysForm() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>
-            When a website order is paid, HOC POSTs to Velo&apos;s{" "}
+            When a website order is paid, the shop POSTs to Velo&apos;s{" "}
             <code className="text-xs">notify-velo-order-push</code> edge
             function so the Velo app can alert immediately (not only poll every
             15s).

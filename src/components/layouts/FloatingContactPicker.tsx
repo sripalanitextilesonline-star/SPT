@@ -91,6 +91,28 @@ export function FloatingContactPicker({
     };
   }, [close, isOpen]);
 
+  if (contactList.length === 1) {
+    const contact = contactList[0];
+    const href = contactActionHref(contact, mode);
+    const external = mode === "whatsapp";
+
+    return (
+      <a
+        href={href}
+        target={external ? "_blank" : undefined}
+        rel={external ? "noopener noreferrer" : undefined}
+        aria-label={
+          mode === "call"
+            ? `Call ${contact.name} at ${contact.phone}`
+            : `WhatsApp ${contact.name} at ${contact.phone}`
+        }
+        className={triggerClassName}
+      >
+        {triggerIcon}
+      </a>
+    );
+  }
+
   return (
     <div
       ref={rootRef}

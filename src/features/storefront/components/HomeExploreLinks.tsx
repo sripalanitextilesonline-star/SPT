@@ -6,10 +6,10 @@ export function HomeExploreLinks() {
   return (
     <section
       className="craft-kraft craft-torn-top rounded-2xl px-4 py-8 md:px-6 md:py-10"
-      aria-labelledby="explore-hoc-heading"
+      aria-labelledby="explore-shop-heading"
     >
       <h2
-        id="explore-hoc-heading"
+        id="explore-shop-heading"
         className="font-[family-name:var(--font-hero-serif)] text-xl font-semibold text-foreground md:text-2xl"
       >
         Explore Sri Palani Textiles

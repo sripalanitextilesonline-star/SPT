@@ -44,6 +44,12 @@ import {
   SelectProducts,
   products,
 } from "@/lib/supabase/schema";
+import {
+  DIGITAL_UPLOAD_LIMIT_MB,
+  DIGITAL_ZIP_CONTENT_TYPE,
+  assertDigitalUploadLimits,
+  formatDigitalUploadNetworkError,
+} from "@/lib/products/digital-product";
 import { MAX_PRODUCT_IMAGES } from "@/lib/admin/product-gallery-shared";
 import { X } from "lucide-react";
 import {
@@ -259,9 +265,30 @@ const productFormSchema = createInsertSchema(products)
       .trim()
       .min(1, "Catalog is required."),
     soldAsPack: z.coerce.boolean().default(false),
+    isDigital: z.coerce.boolean().default(false),
     packSize: z.union([z.coerce.number(), z.null()]).optional().nullable(),
+    weightKg: z.preprocess(
+      (value) => (value == null ? "" : String(value).trim()),
+      z.string(),
+    ),
   })
   .superRefine((data, ctx) => {
+    if (!data.isDigital) {
+      const weight = Number(data.weightKg);
+      if (!data.weightKg || !Number.isFinite(weight) || weight < 0.01) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Enter the weight of 1 product in kg (e.g. 0.5).",
+          path: ["weightKg"],
+        });
+      } else if (weight > 1000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Weight must be 1000 kg or less.",
+          path: ["weightKg"],
+        });
+      }
+    }
     if (!data.soldAsPack) return;
     const packSize = Number(data.packSize);
     if (
@@ -356,6 +383,23 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
   const [customTypeDialogOpen, setCustomTypeDialogOpen] = useState(false);
   const [customTypeNameDraft, setCustomTypeNameDraft] = useState("");
   const [customTypeError, setCustomTypeError] = useState<string | null>(null);
+  const [digitalFile, setDigitalFile] = useState<{
+    key: string;
+    fileName: string;
+    fileSize: number;
+    contentType: string;
+  } | null>(() =>
+    product?.isDigital && product.digitalFileKey
+      ? {
+          key: product.digitalFileKey,
+          fileName: product.digitalFileName || "software.zip",
+          fileSize: product.digitalFileSize || 0,
+          contentType: product.digitalContentType || "application/octet-stream",
+        }
+      : null,
+  );
+  const [digitalUploading, setDigitalUploading] = useState(false);
+  const digitalFileInputRef = useRef<HTMLInputElement>(null);
   const localFileInputRef = useRef<HTMLInputElement>(null);
 
   const [{ data }] = useQuery({
@@ -370,7 +414,10 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
       discountEnabled: product?.discountEnabled ?? false,
       discountPercent: product?.discountPercent ?? null,
       soldAsPack: product?.soldAsPack ?? false,
+      isDigital: product?.isDigital ?? false,
       packSize: product?.packSize ?? null,
+      weightKg:
+        product?.weightKg != null ? String(Number(product.weightKg)) : "",
       stock: typeof product?.stock === "number" ? product.stock : 1,
       featuredImageId:
         product?.featuredImageId ??
@@ -668,6 +715,108 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
     setProductImageMediaIds((prev) => prev.filter((id) => id !== mediaId));
   };
 
+  const uploadDigitalSoftwareFile = async (file: File) => {
+    setDigitalUploading(true);
+    try {
+      assertDigitalUploadLimits({
+        fileName: file.name,
+        fileSize: file.size,
+      });
+
+      const initRes = await fetchWithTimeout(
+        "/api/admin/products/digital-file/init",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            contentType: DIGITAL_ZIP_CONTENT_TYPE,
+            fileSize: file.size,
+          }),
+        },
+      );
+      const initBody = (await initRes.json().catch(() => null)) as {
+        message?: string;
+        key?: string;
+        uploadUrl?: string;
+        fileName?: string;
+      } | null;
+      if (!initRes.ok || !initBody?.key || !initBody.uploadUrl) {
+        throw new Error(
+          initBody?.message || "Could not start software upload.",
+        );
+      }
+
+      let putRes: Response;
+      try {
+        putRes = await fetch(initBody.uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": DIGITAL_ZIP_CONTENT_TYPE,
+            "Content-Length": String(file.size),
+          },
+          body: file,
+        });
+      } catch (networkError) {
+        throw new Error(formatDigitalUploadNetworkError(networkError));
+      }
+      if (!putRes.ok) {
+        throw new Error(
+          `Software upload failed (${putRes.status}). Please retry.`,
+        );
+      }
+
+      const completeRes = await fetchWithTimeout(
+        "/api/admin/products/digital-file/complete",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key: initBody.key,
+            fileName: file.name,
+            contentType: DIGITAL_ZIP_CONTENT_TYPE,
+            fileSize: file.size,
+          }),
+        },
+      );
+      const completeBody = (await completeRes.json().catch(() => null)) as {
+        message?: string;
+        key?: string;
+        fileName?: string;
+        fileSize?: number;
+        contentType?: string;
+      } | null;
+      if (!completeRes.ok || !completeBody?.key) {
+        throw new Error(
+          completeBody?.message || "Could not finish software upload.",
+        );
+      }
+
+      setDigitalFile({
+        key: completeBody.key,
+        fileName: completeBody.fileName || file.name,
+        fileSize: completeBody.fileSize || file.size,
+        contentType: completeBody.contentType || DIGITAL_ZIP_CONTENT_TYPE,
+      });
+      toast({
+        title: "Software file uploaded",
+        description: completeBody.fileName || file.name,
+      });
+    } catch (error) {
+      toast({
+        title: "Software upload failed",
+        description:
+          error instanceof Error
+            ? formatDigitalUploadNetworkError(error)
+            : "Please retry.",
+        variant: "destructive",
+      });
+    } finally {
+      setDigitalUploading(false);
+      if (digitalFileInputRef.current) digitalFileInputRef.current.value = "";
+    }
+  };
+
   const setProductImageAsMain = (mediaId: string) => {
     setProductImageMediaIds((prev) => {
       if (!prev.includes(mediaId)) return prev;
@@ -684,7 +833,7 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
         throw new Error("Select at least one product image.");
       }
 
-      if (normalizedSizeConfig.enabled) {
+      if (normalizedSizeConfig.enabled && !data.isDigital) {
         const activeGroups = normalizedSizeConfig.groups.filter((group) =>
           group.options.some((option) => Number(option.qty ?? 0) > 0),
         );
@@ -721,6 +870,11 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
           ...data,
           price: priceForSave,
           featuredImageId: productImageMediaIds[0],
+          isDigital: Boolean(data.isDigital),
+          digitalFileKey: data.isDigital ? digitalFile?.key : null,
+          digitalFileName: data.isDigital ? digitalFile?.fileName : null,
+          digitalFileSize: data.isDigital ? digitalFile?.fileSize : null,
+          digitalContentType: data.isDigital ? digitalFile?.contentType : null,
         },
         {
           stockFallback: stockControl.enabled ? 1 : 0,
@@ -768,7 +922,9 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             productId,
-            config: normalizedSizeConfig,
+            config: data.isDigital
+              ? { enabled: false, groups: [] }
+              : normalizedSizeConfig,
           }),
         },
       );
@@ -790,6 +946,17 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
         stock: typeof savedProduct.stock === "number" ? savedProduct.stock : 1,
       });
       setProductImageMediaIds(productImageMediaIds);
+      if (savedProduct.isDigital && savedProduct.digitalFileKey) {
+        setDigitalFile({
+          key: savedProduct.digitalFileKey,
+          fileName: savedProduct.digitalFileName || "software.zip",
+          fileSize: savedProduct.digitalFileSize || 0,
+          contentType:
+            savedProduct.digitalContentType || "application/octet-stream",
+        });
+      } else {
+        setDigitalFile(null);
+      }
       setSavedSummary(productStorefrontVisibilitySummary(savedProduct));
 
       toast({
@@ -1454,6 +1621,111 @@ function ProductFrom({ product, galleryMediaIds = [] }: ProductsFormProps) {
             </FormItem>
           ) : null}
 
+          {!watch("isDigital") ? (
+            <FormField
+              control={control}
+              name="weightKg"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm">
+                    Weight of 1 product (kg)*
+                  </FormLabel>
+                  <FormControl>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0.01}
+                        max={1000}
+                        step={0.01}
+                        placeholder="e.g. 0.5"
+                        name={field.name}
+                        ref={field.ref}
+                        onBlur={field.onBlur}
+                        value={field.value ?? ""}
+                        onChange={(event) => field.onChange(event.target.value)}
+                      />
+                      <span className="text-sm text-muted-foreground">kg</span>
+                    </div>
+                  </FormControl>
+                  <FormDescription>
+                    Used for weight-wise courier charges (weight × quantity).
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          ) : null}
+
+          <FormField
+            control={control}
+            name="isDigital"
+            render={({ field }) => (
+              <FormItem className="flex flex-row items-start gap-3 rounded-lg border p-4">
+                <FormControl>
+                  <Checkbox
+                    checked={Boolean(field.value)}
+                    onCheckedChange={(checked) => {
+                      field.onChange(Boolean(checked));
+                      if (checked) {
+                        form.setValue("soldAsPack", false);
+                        form.setValue("packSize", null);
+                      }
+                    }}
+                  />
+                </FormControl>
+                <div className="space-y-1 leading-none">
+                  <FormLabel>Software / digital product</FormLabel>
+                  <FormDescription>
+                    After the customer pays, they get a Download button on the
+                    order page. No courier charge for this item.
+                  </FormDescription>
+                </div>
+              </FormItem>
+            )}
+          />
+
+          {watch("isDigital") ? (
+            <FormItem>
+              <FormLabel className="text-sm">Software file*</FormLabel>
+              <input
+                ref={digitalFileInputRef}
+                type="file"
+                className="hidden"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void uploadDigitalSoftwareFile(file);
+                }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={digitalUploading || isPending}
+                  onClick={() => digitalFileInputRef.current?.click()}
+                >
+                  {digitalUploading
+                    ? "Uploading…"
+                    : digitalFile
+                      ? "Replace file"
+                      : "Upload file"}
+                </Button>
+                {digitalFile ? (
+                  <p className="text-sm text-muted-foreground">
+                    {digitalFile.fileName}
+                    {digitalFile.fileSize
+                      ? ` · ${Math.max(1, Math.round(digitalFile.fileSize / 1024))} KB`
+                      : ""}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Zip only, up to {DIGITAL_UPLOAD_LIMIT_MB} MB.
+                  </p>
+                )}
+              </div>
+            </FormItem>
+          ) : null}
+
           <FormField
             control={control}
             name="stock"
@@ -2113,9 +2385,9 @@ function DiscountPreview({
   return (
     <div className="rounded-md border bg-muted/40 p-3 text-sm">
       <p className="text-xs font-medium text-muted-foreground mb-1">
-        Customer will see
+        Exclusive DB price (storefront adds GST when enabled)
       </p>
-      <ProductPriceDisplay product={previewProduct} />
+      <ProductPriceDisplay product={previewProduct} inclusive={false} />
       <p className="mt-2 text-xs text-muted-foreground">
         MRP {formatPrice(getOriginalProductPrice(previewProduct))} → sale{" "}
         {formatPrice(getSaleProductPrice(previewProduct))}

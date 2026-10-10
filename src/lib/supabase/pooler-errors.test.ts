@@ -1,44 +1,41 @@
 import {
   isPoolerSocketError,
-  isUniqueViolation,
   mapProductSaveError,
   POOLER_INTERRUPTED_MESSAGE,
   PRODUCT_SAVE_MAY_EXIST_MESSAGE,
 } from "./pooler-errors";
 
-describe("pooler-errors", () => {
-  it("detects pooler socket crashes", () => {
+describe("mapProductSaveError", () => {
+  it("maps postgres.js onclose races to a retry message", () => {
+    const mapped = mapProductSaveError(
+      new Error("Cannot set properties of undefined (setting 'onclose')"),
+    );
+    expect(mapped.message).toBe(POOLER_INTERRUPTED_MESSAGE);
+  });
+
+  it("maps unique violations to a refresh message instead of retrying blindly", () => {
+    const mapped = mapProductSaveError({ code: "23505" });
+    expect(mapped.message).toBe(PRODUCT_SAVE_MAY_EXIST_MESSAGE);
+  });
+
+  it("keeps real validation errors", () => {
+    const mapped = mapProductSaveError(
+      new Error("Select at least one product image."),
+    );
+    expect(mapped.message).toBe("Select at least one product image.");
+  });
+});
+
+describe("isPoolerSocketError", () => {
+  it("matches queue races from a recycled socket", () => {
     expect(
       isPoolerSocketError(
-        new Error("Cannot read properties of undefined (reading 'queue')"),
+        new TypeError("Cannot read properties of undefined (reading 'queue')"),
       ),
     ).toBe(true);
-    expect(
-      isPoolerSocketError(new Error("connection closed via onclose")),
-    ).toBe(true);
-    expect(isPoolerSocketError(new Error("validation failed"))).toBe(false);
   });
 
-  it("detects unique violations", () => {
-    expect(isUniqueViolation({ code: "23505" })).toBe(true);
-    expect(isUniqueViolation({ code: "23503" })).toBe(false);
-  });
-
-  it("maps pooler errors to retry message", () => {
-    expect(mapProductSaveError(new Error("reading 'queue'")).message).toBe(
-      POOLER_INTERRUPTED_MESSAGE,
-    );
-  });
-
-  it("maps unique violations to may-exist message", () => {
-    expect(mapProductSaveError({ code: "23505" }).message).toBe(
-      PRODUCT_SAVE_MAY_EXIST_MESSAGE,
-    );
-  });
-
-  it("preserves validation errors", () => {
-    expect(mapProductSaveError(new Error("Name is required.")).message).toBe(
-      "Name is required.",
-    );
+  it("does not match schema errors", () => {
+    expect(isPoolerSocketError(new Error("column does not exist"))).toBe(false);
   });
 });

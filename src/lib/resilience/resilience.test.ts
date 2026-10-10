@@ -29,6 +29,11 @@ describe("isTransientError", () => {
     expect(
       isTransientError(new Error("wrapped", { cause: new Error("timeout") })),
     ).toBe(true);
+    expect(
+      isTransientError(
+        new TypeError("Cannot set properties of undefined (setting 'onclose')"),
+      ),
+    ).toBe(true);
   });
 
   it("does not match deterministic failures", () => {
