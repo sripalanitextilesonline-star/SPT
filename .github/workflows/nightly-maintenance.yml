@@ -1,8 +1,8 @@
 name: Nightly maintenance
 
+# Manual only: needs the CRON_SECRET repo secret. Restore the schedule
+# (cron: "30 18 * * *") once that secret is added.
 on:
-  schedule:
-    - cron: "30 18 * * *"
   workflow_dispatch:
 
 permissions:
