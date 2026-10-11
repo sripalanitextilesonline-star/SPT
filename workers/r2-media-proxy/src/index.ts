@@ -51,15 +51,25 @@ type ImagesBinding = {
 export interface Env {
   MEDIA_BUCKET: R2BucketBinding;
   MEDIA_PROXY_SECRET: string;
-  IMAGES: ImagesBinding;
+  IMAGES?: ImagesBinding;
+  /** "off" serves R2 originals from /cdn without calling Images. */
+  CDN_RESIZE?: string;
 }
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const TOKEN_PREFIX = "uv1";
 const STAGING_PREFIX = "uploads/staging/";
-const MAX_CDN_WIDTH = 1600;
+const MAX_CDN_WIDTH = 4096;
 const DEFAULT_CDN_WIDTH = 800;
 const DEFAULT_CDN_QUALITY = 75;
+
+/**
+ * Images Free allows 5,000 unique transforms/month (no charge beyond; new
+ * transforms then fail and we serve the original). Snap every request to two
+ * widths with fixed quality so each image costs at most a few variants.
+ */
+const CDN_SMALL_WIDTH = 480;
+const CDN_LARGE_WIDTH = 1200;
 
 function jsonResponse(request: Request, body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -240,7 +250,35 @@ function parseCdnOptions(raw: string): CdnOptions | null {
 
 /** Public product media only; never expose arbitrary bucket paths. */
 function isPublicCdnKey(key: string): boolean {
-  return key.startsWith("uploads/") && !key.includes("..");
+  return (
+    key.startsWith("uploads/") &&
+    !key.startsWith(STAGING_PREFIX) &&
+    !key.includes("..")
+  );
+}
+
+function snapCdnOptions(parsed: CdnOptions): CdnOptions {
+  const format: CdnOptions["format"] =
+    parsed.format === "image/jpeg" ? "image/jpeg" : "image/webp";
+  if (parsed.width <= CDN_SMALL_WIDTH) {
+    return { width: CDN_SMALL_WIDTH, quality: 75, format };
+  }
+  return { width: CDN_LARGE_WIDTH, quality: 80, format };
+}
+
+function cdnOptionsPath(opts: CdnOptions): string {
+  const f = opts.format === "image/jpeg" ? "jpeg" : "webp";
+  return `w=${opts.width},q=${opts.quality},f=${f}`;
+}
+
+function isTransformableType(contentType: string): boolean {
+  const ct = contentType.toLowerCase();
+  return (
+    ct.startsWith("image/") &&
+    !ct.includes("svg") &&
+    !ct.includes("gif") &&
+    !ct.includes("x-icon")
+  );
 }
 
 async function handleCdnGet(
@@ -251,46 +289,31 @@ async function handleCdnGet(
 ): Promise<Response> {
   const parsed = parseCdnOptions(optionsRaw);
   if (!parsed) return badRequest(request, "Invalid CDN options.");
-
-  // Images Free: only ~5k unique transforms/month. Snap every /cdn request to
-  // the proven working size so PDP/thumb URLs reuse the same cached variant.
-  const opts: CdnOptions = {
-    ...parsed,
-    width: 400,
-    quality: 75,
-    format: "image/webp",
-  };
+  const opts = snapCdnOptions(parsed);
 
   const key = sanitizeKey(keyRaw);
   if (!key || !isPublicCdnKey(key)) {
     return badRequest(request, "Missing or invalid key.");
   }
 
+  const withCors = (response: Response): Response => {
+    const headers = new Headers(response.headers);
+    Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+    return new Response(response.body, { status: response.status, headers });
+  };
+
+  // All requested widths map to one snapped URL so they share a cache entry.
+  const cacheUrl = new URL(request.url);
+  cacheUrl.search = "";
+  cacheUrl.pathname = `/cdn/${cdnOptionsPath(opts)}/${key
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
   const cache = caches.default;
 
-  // Prefer any previously cached successful transform for this exact URL,
-  // then the known-good 400w canonical URL (from before Images Free exhausted).
-  const cacheHit = await cache.match(request);
-  if (cacheHit && cacheHit.ok) return cacheHit;
-
-  const canonicalUrl = new URL(request.url);
-  const keyPath = key.split("/").map(encodeURIComponent).join("/");
-  canonicalUrl.pathname = `/cdn/w=400,q=75,f=webp/${keyPath}`;
-  const canonicalRequest = new Request(canonicalUrl.toString(), {
-    method: "GET",
-  });
-  const canonicalHit = await cache.match(canonicalRequest);
-  if (canonicalHit && canonicalHit.ok) {
-    const headers = new Headers(canonicalHit.headers);
-    headers.set("X-SPT-CDN-Canonical", "w=400");
-    Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
-    const reused = new Response(canonicalHit.body, {
-      status: 200,
-      headers,
-    });
-    await cache.put(request, reused.clone());
-    return reused;
-  }
+  const cacheHit = await cache.match(cacheKey);
+  if (cacheHit && cacheHit.ok) return withCors(cacheHit);
 
   const obj = await env.MEDIA_BUCKET.get(key);
   if (!obj) {
@@ -314,13 +337,41 @@ async function handleCdnGet(
     return jsonResponse(request, { error: "Not found" }, 404);
   }
 
-  // Images Free unique-transform quota is exhausted on this account. Calling
-  // the Images binding hard-fails the isolate (platform 500); try/catch does
-  // not help. Serve R2 originals until Images Paid is enabled.
-  // Keep `opts` referenced so the snap stays in the bundle for when we re-enable.
-  void opts;
-  void env.IMAGES;
+  const resizeEnabled =
+    Boolean(env.IMAGES) &&
+    String(env.CDN_RESIZE ?? "on")
+      .trim()
+      .toLowerCase() !== "off" &&
+    isTransformableType(contentType);
 
+  if (resizeEnabled && env.IMAGES) {
+    try {
+      const output = await env.IMAGES.input(
+        new Response(originalBytes).body as ReadableStream,
+      )
+        .transform({ width: opts.width, fit: "scale-down" })
+        .output({ format: opts.format, quality: opts.quality });
+      const transformed = output.response();
+      if (transformed.ok) {
+        const bytes = await transformed.arrayBuffer();
+        if (bytes.byteLength > 0) {
+          const headers = new Headers();
+          headers.set("Content-Type", opts.format);
+          headers.set("Cache-Control", "public, max-age=31536000, immutable");
+          headers.set("X-SPT-CDN", cdnOptionsPath(opts));
+          const resized = new Response(bytes, { status: 200, headers });
+          await cache.put(cacheKey, resized.clone());
+          return withCors(resized);
+        }
+      }
+      console.error("[cdn] transform not ok:", key, transformed.status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[cdn] transform failed:", key, message);
+    }
+  }
+
+  // Original bytes: short cache so a later successful resize can replace it.
   const headers = new Headers();
   headers.set("Content-Type", contentType);
   headers.set(
@@ -328,11 +379,9 @@ async function handleCdnGet(
     "public, max-age=3600, stale-while-revalidate=86400",
   );
   headers.set("X-SPT-CDN-Fallback", "original");
-  Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
-
-  const response = new Response(originalBytes, { status: 200, headers });
-  await cache.put(request, response.clone());
-  return response;
+  const original = new Response(originalBytes, { status: 200, headers });
+  await cache.put(cacheKey, original.clone());
+  return withCors(original);
 }
 
 export default {
@@ -351,6 +400,10 @@ export default {
         ok: true,
         promote: true,
         images: Boolean(env.IMAGES),
+        resize:
+          String(env.CDN_RESIZE ?? "on")
+            .trim()
+            .toLowerCase() !== "off",
       });
     }
 

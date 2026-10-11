@@ -1,9 +1,8 @@
 name: Deploy Cloudflare Workers
 
+# Manual only: production is hosted on Vercel. Running this attaches
+# sripalanitextiles.com to the Cloudflare Worker.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:

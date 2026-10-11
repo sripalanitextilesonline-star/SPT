@@ -16,8 +16,8 @@ const SOCIAL_IMAGE_HEIGHT = 630;
  * Cloudflare Images: keep social CDN transforms small and JPEG so Meta/Instagram
  * crawlers accept the URL (WebP previews are unreliable).
  */
-const SOCIAL_CDN_WIDTH = 400;
-const SOCIAL_CDN_QUALITY = 75;
+const SOCIAL_CDN_WIDTH = 1200;
+const SOCIAL_CDN_QUALITY = 80;
 const SOCIAL_CDN_FORMAT = "jpeg" as const;
 
 export type SocialImageResolveDeps = {

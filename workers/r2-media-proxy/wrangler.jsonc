@@ -4,13 +4,25 @@
   "account_id": "aaa80267f9d75b8a485ef7139a1e9256",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-05",
+  "routes": [
+    {
+      "pattern": "media.sripalanitextiles.com",
+      "custom_domain": true,
+    },
+  ],
   "r2_buckets": [
     {
       "binding": "MEDIA_BUCKET",
-      "bucket_name": "spt-cdn"
-    }
+      "bucket_name": "spt-cdn",
+    },
   ],
+  "images": {
+    "binding": "IMAGES",
+  },
+  "vars": {
+    "CDN_RESIZE": "on",
+  },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }

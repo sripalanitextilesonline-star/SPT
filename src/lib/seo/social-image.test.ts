@@ -70,7 +70,7 @@ describe("resolveSocialImageUrl", () => {
   it("rewrites *.r2.dev uploads URLs to media CDN JPEG", () => {
     expect(
       resolveSocialImageUrl(
-        "https://pub-7298c413a12641b5ba5dd9bff2d9009f.r2.dev/uploads/a.png",
+        "https://pub-65f24d69fb304b0b87901be92e533cb1.r2.dev/uploads/a.png",
         deps,
       ),
     ).toBe(
@@ -82,11 +82,11 @@ describe("resolveSocialImageUrl", () => {
     const legacyDeps: SocialImageResolveDeps = {
       ...deps,
       buildCdnSocialUrl: () =>
-        "https://pub-7298c413a12641b5ba5dd9bff2d9009f.r2.dev/uploads/a.png",
+        "https://pub-65f24d69fb304b0b87901be92e533cb1.r2.dev/uploads/a.png",
     };
     expect(
       resolveSocialImageUrl(
-        "https://pub-7298c413a12641b5ba5dd9bff2d9009f.r2.dev/uploads/a.png",
+        "https://pub-65f24d69fb304b0b87901be92e533cb1.r2.dev/uploads/a.png",
         legacyDeps,
       ),
     ).toBe(absoluteSocialFallbackUrl("https://sripalanitextiles.com"));

@@ -10,35 +10,39 @@ export type CdnImageOptions = {
 };
 
 /**
- * Images Free allows ~5k unique transforms/month. Snap every storefront
- * request to one proven working size so cards/PDP/hero reuse the same cache
- * entry instead of burning quota on 128/800/1200 variants.
+ * Images Free allows 5k unique transforms/month. Every request snaps to one
+ * of two widths with fixed quality (mirrored in the media worker) so each
+ * image costs at most a few variants.
  */
-export const CDN_SAFE_WIDTH = 400;
+export const CDN_SAFE_WIDTH = 480;
 export const CDN_SAFE_QUALITY = 75;
 export const CDN_SAFE_FORMAT = "webp" as const;
+export const CDN_LARGE_WIDTH = 1200;
+export const CDN_LARGE_QUALITY = 80;
 
-const SAFE_PRESET = {
+const SMALL_PRESET = {
   width: CDN_SAFE_WIDTH,
   quality: CDN_SAFE_QUALITY,
   format: CDN_SAFE_FORMAT,
 } as const;
 
-export const CDN_PRESETS = {
-  thumb: { ...SAFE_PRESET },
-  card: { ...SAFE_PRESET },
-  pdp: { ...SAFE_PRESET },
-  /** Mobile LCP hero — same safe width while Images Free is constrained. */
-  heroMobile: { ...SAFE_PRESET },
-  hero: { ...SAFE_PRESET },
+const LARGE_PRESET = {
+  width: CDN_LARGE_WIDTH,
+  quality: CDN_LARGE_QUALITY,
+  format: CDN_SAFE_FORMAT,
 } as const;
 
-/**
- * Pick CDN quality/format for an optimizeWidth so preload URLs match
- * StorefrontImage. Widths are snapped to CDN_SAFE_WIDTH on Free Images.
- */
-export function cdnPresetForWidth(_width: number): CdnImageOptions {
-  return { ...CDN_PRESETS.card };
+export const CDN_PRESETS = {
+  thumb: { ...SMALL_PRESET },
+  card: { ...SMALL_PRESET },
+  pdp: { ...LARGE_PRESET },
+  heroMobile: { ...LARGE_PRESET },
+  hero: { ...LARGE_PRESET },
+} as const;
+
+/** Pick the snapped CDN preset for an optimizeWidth (matches preload URLs). */
+export function cdnPresetForWidth(width: number): CdnImageOptions {
+  return width <= CDN_SAFE_WIDTH ? { ...SMALL_PRESET } : { ...LARGE_PRESET };
 }
 
 const DEFAULT_MEDIA_ORIGIN = "https://media.sripalanitextiles.com";
@@ -125,12 +129,10 @@ export function cdnImageUrl(
     return input.startsWith("http") || input.startsWith("/") ? input : FALLBACK;
   }
 
-  // Always snap to the safe Free-tier size (ignore caller width).
-  const quality = Math.min(
-    100,
-    Math.max(20, Math.round(options.quality ?? CDN_SAFE_QUALITY)),
-  );
-  const format = options.format ?? CDN_SAFE_FORMAT;
-  const opts = `w=${CDN_SAFE_WIDTH},q=${quality},f=${format}`;
+  const small = options.width <= CDN_SAFE_WIDTH;
+  const width = small ? CDN_SAFE_WIDTH : CDN_LARGE_WIDTH;
+  const quality = small ? CDN_SAFE_QUALITY : CDN_LARGE_QUALITY;
+  const format = options.format === "jpeg" ? "jpeg" : CDN_SAFE_FORMAT;
+  const opts = `w=${width},q=${quality},f=${format}`;
   return `${mediaOrigin()}/cdn/${opts}/${key}`;
 }
