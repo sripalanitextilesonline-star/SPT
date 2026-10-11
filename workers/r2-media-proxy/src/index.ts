@@ -266,6 +266,13 @@ function snapCdnOptions(parsed: CdnOptions): CdnOptions {
   return { width: CDN_LARGE_WIDTH, quality: 80, format };
 }
 
+/** Browsers that cannot decode WebP (iOS 13 and older, IE) omit it from Accept. */
+function acceptsWebp(request: Request): boolean {
+  const accept = request.headers.get("accept");
+  if (!accept) return true;
+  return accept.toLowerCase().includes("image/webp");
+}
+
 function cdnOptionsPath(opts: CdnOptions): string {
   const f = opts.format === "image/jpeg" ? "jpeg" : "webp";
   return `w=${opts.width},q=${opts.quality},f=${f}`;
@@ -290,6 +297,8 @@ async function handleCdnGet(
   const parsed = parseCdnOptions(optionsRaw);
   if (!parsed) return badRequest(request, "Invalid CDN options.");
   const opts = snapCdnOptions(parsed);
+  const negotiated = opts.format === "image/webp";
+  if (negotiated && !acceptsWebp(request)) opts.format = "image/jpeg";
 
   const key = sanitizeKey(keyRaw);
   if (!key || !isPublicCdnKey(key)) {
@@ -299,6 +308,7 @@ async function handleCdnGet(
   const withCors = (response: Response): Response => {
     const headers = new Headers(response.headers);
     Object.entries(corsHeaders(request)).forEach(([k, v]) => headers.set(k, v));
+    if (negotiated) headers.set("Vary", "Origin, Accept");
     return new Response(response.body, { status: response.status, headers });
   };
 
