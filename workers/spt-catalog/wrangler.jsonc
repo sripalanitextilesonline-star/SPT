@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "spt-catalog",
+  "account_id": "aaa80267f9d75b8a485ef7139a1e9256",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-05",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "catalog.sripalanitextiles.com", "custom_domain": true },
+  ],
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["*/30 * * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spt-catalog",
+      "database_id": "1dd95252-65f7-43c1-8c18-1b70d8040423",
+    },
+  ],
+}
